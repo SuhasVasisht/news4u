@@ -1,0 +1,109 @@
+@import "tailwindcss";
+
+:root {
+  --canvas: #f4efe6;
+  --panel: #fbf8f2;
+  --panel-strong: #fffdf8;
+  --line: rgba(40, 35, 28, 0.12);
+  --line-strong: rgba(40, 35, 28, 0.2);
+  --ink: #201811;
+  --muted: #62584e;
+  --accent: #b74d35;
+  --accent-soft: rgba(183, 77, 53, 0.14);
+  --success: #2f7a58;
+  --shadow: 0 24px 60px rgba(38, 26, 16, 0.08);
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-panel: var(--panel);
+  --color-panel-strong: var(--panel-strong);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-success: var(--success);
+  --font-sans: var(--font-instrument-sans);
+  --font-display: var(--font-fraunces);
+}
+
+.dark {
+  --canvas: #171310;
+  --panel: #211b17;
+  --panel-strong: #28211d;
+  --line: rgba(255, 243, 226, 0.09);
+  --line-strong: rgba(255, 243, 226, 0.16);
+  --ink: #f5efe6;
+  --muted: #c0b4a8;
+  --accent: #e27d54;
+  --accent-soft: rgba(226, 125, 84, 0.15);
+  --success: #76c69f;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
+}
+
+* {
+  border-color: var(--line);
+}
+
+html {
+  background:
+    radial-gradient(circle at top left, rgba(183, 77, 53, 0.08), transparent 25%),
+    radial-gradient(circle at bottom right, rgba(78, 114, 101, 0.08), transparent 30%),
+    var(--canvas);
+}
+
+body {
+  min-height: 100vh;
+  background: transparent;
+  color: var(--ink);
+}
+
+a,
+button,
+input,
+textarea,
+select {
+  transition:
+    color 140ms ease,
+    background-color 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease,
+    opacity 140ms ease;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+.surface {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.surface-strong {
+  background: var(--panel-strong);
+  border: 1px solid var(--line-strong);
+}
+
+.headline {
+  font-family: var(--font-fraunces);
+  letter-spacing: -0.03em;
+}
+
+.fade-in {
+  animation: fade-in 220ms ease;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

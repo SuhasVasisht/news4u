@@ -1,0 +1,211 @@
+defaults:
+  request_timeout_seconds: 20
+  user_agent: "news-collector/0.1 (local development; contact@example.com)"
+  output_dir: "output"
+  db_path: "data/news_collector.db"
+  gdelt_min_interval_seconds: 5
+  sec_rate_limit_per_second: 2
+  alpha_vantage_daily_limit: 25
+  unofficial_initial_delay_seconds:
+    min: 0
+    max: 0
+
+trust_scores:
+  techcrunch: 0.86
+  bbc_world: 0.9
+  bbc_politics: 0.9
+  guardian: 0.88
+  hackernews: 0.72
+  techmeme: 0.75
+  arxiv_cs_ai: 0.8
+  sec_press: 0.98
+  ap_top_news: 0.93
+  tldr_tech: 0.72
+  tldr_ai: 0.72
+  gdelt: 0.6
+  alphavantage_news: 0.7
+  alphavantage_movers: 0.82
+  producthunt: 0.7
+  reddit: 0.4
+  newsapi: 0.65
+  x_search: 0.45
+
+watchlists:
+  tech_entities:
+    - OpenAI
+    - Anthropic
+    - Nvidia
+    - Google
+    - Microsoft
+    - Meta
+    - Amazon
+    - Apple
+  finance_tickers:
+    - AAPL
+    - MSFT
+    - NVDA
+    - AMZN
+    - GOOGL
+    - META
+    - TSLA
+    - AMD
+
+collectors:
+  - name: techcrunch
+    type: rss
+    enabled: true
+    category: tech
+    url: https://techcrunch.com/feed/
+  - name: bbc_world
+    type: rss
+    enabled: true
+    category: world
+    url: https://feeds.bbci.co.uk/news/world/rss.xml
+  - name: bbc_politics
+    type: rss
+    enabled: true
+    category: politics
+    url: https://feeds.bbci.co.uk/news/politics/rss.xml
+  - name: sec_press
+    type: rss
+    enabled: true
+    category: finance
+    url: https://www.sec.gov/rss/news/press.xml
+  - name: guardian
+    type: guardian
+    enabled: true
+    category: world
+    sections:
+      - world
+      - us-news
+      - business
+      - technology
+  - name: hackernews
+    type: hackernews
+    enabled: true
+    category: tech
+    limit: 20
+  - name: techmeme
+    type: techmeme
+    enabled: true
+    category: tech
+    url: https://www.techmeme.com/feed.xml
+  - name: arxiv_cs_ai
+    type: rss
+    enabled: true
+    category: tech
+    url: https://arxiv.org/rss/cs.AI
+  - name: gdelt
+    type: gdelt
+    enabled: true
+    category: world
+    queries:
+      - technology
+      - ai OR semiconductor OR cloud
+      - election OR sanctions OR parliament
+  - name: alphavantage_news
+    type: alphavantage_news
+    enabled: true
+    category: finance
+    topics:
+      - technology
+      - financial_markets
+      - mergers_and_acquisitions
+  - name: alphavantage_movers
+    type: alphavantage_movers
+    enabled: true
+    category: finance
+  - name: tldr_tech
+    type: tldr
+    enabled: true
+    category: tech
+    unofficial: true
+    newsletter: tech
+    url: https://tldr.tech/tech
+    schedule_hours: 3
+    max_items_per_run: 12
+  - name: tldr_ai
+    type: tldr
+    enabled: true
+    category: tech
+    unofficial: true
+    newsletter: ai
+    url: https://tldr.tech/ai
+    schedule_hours: 3
+    max_items_per_run: 12
+  - name: ap_top_news
+    type: ap
+    enabled: true
+    category: world
+    unofficial: true
+    url: https://apnews.com/hub/apf-topnews
+    schedule_hours: 2
+    max_requests_per_run: 6
+    min_request_delay_seconds: 6
+    max_request_delay_seconds: 10
+    cooldown_hours: 24
+  - name: x_search
+    type: x
+    enabled: true
+    category: tech
+    unofficial: true
+    mode: tracked_accounts
+    schedule_hours: 4
+    max_accounts_per_run: 5
+    max_posts_per_account: 2
+    hours_back: 24
+    link_required: false
+    cooldown_hours: 24
+    human_initial_delay_seconds:
+      min: 8
+      max: 20
+    min_account_delay_seconds: 12
+    max_account_delay_seconds: 25
+    min_scroll_delay_seconds: 1.5
+    max_scroll_delay_seconds: 4
+    scroll_count_min: 2
+    scroll_count_max: 4
+    scroll_pixels_min: 400
+    scroll_pixels_max: 900
+    query_filters:
+      - OpenAI
+      - Anthropic
+      - Nvidia
+      - semiconductor
+      - datacenter
+      - AI
+    accounts:
+      - OpenAI
+      - AnthropicAI
+      - GoogleDeepMind
+      - nvidia
+      - Microsoft
+      - github
+      - Cloudflare
+      - vercel
+      - TechCrunch
+      - SECGov
+  - name: producthunt
+    type: producthunt
+    enabled: false
+    category: tech
+    limit: 20
+  - name: reddit
+    type: reddit
+    enabled: false
+    category: tech
+    unofficial: true
+    schedule_hours: 6
+    max_subreddits_per_run: 2
+    max_posts_per_subreddit: 8
+    subreddits:
+      - MachineLearning
+      - programming
+      - selfhosted
+  - name: newsapi
+    type: newsapi
+    enabled: false
+    category: other
+    queries:
+      - technology
+      - finance

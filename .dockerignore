@@ -1,0 +1,10 @@
+node_modules
+.next
+test-results
+coverage
+.env
+.env.local
+scripts/news_collector/.venv
+scripts/news_collector/.pytest_cache
+scripts/news_collector/data
+scripts/news_collector/output

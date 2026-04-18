@@ -1,0 +1,78 @@
+services:
+  proxy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      BASIC_AUTH_USER: ${BASIC_AUTH_USER}
+      BASIC_AUTH_PASSWORD_HASH: ${BASIC_AUTH_PASSWORD_HASH}
+    depends_on:
+      - web
+
+  web:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      SYNC_API_KEY: ${SYNC_API_KEY}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      AUTH_SECRET: ${AUTH_SECRET}
+      AUTH_GOOGLE_ID: ${AUTH_GOOGLE_ID}
+      AUTH_GOOGLE_SECRET: ${AUTH_GOOGLE_SECRET}
+      APP_TIMEZONE: ${APP_TIMEZONE}
+      APP_DAILY_RESET_HOUR: ${APP_DAILY_RESET_HOUR}
+      NEWS_COLLECTOR_DB_PATH: ${NEWS_COLLECTOR_DB_PATH}
+      NEWS_COLLECTOR_OUTPUT_DIR: ${NEWS_COLLECTOR_OUTPUT_DIR}
+      NEWS_COLLECTOR_SYNC_OUTBOX_DIR: ${NEWS_COLLECTOR_SYNC_OUTBOX_DIR}
+      NEWS_COLLECTOR_USER_AGENT: ${NEWS_COLLECTOR_USER_AGENT}
+      NEWS_COLLECTOR_X_PROFILE_DIR: ${NEWS_COLLECTOR_X_PROFILE_DIR}
+      NEWS_COLLECTOR_REDDIT_PROFILE_DIR: ${NEWS_COLLECTOR_REDDIT_PROFILE_DIR}
+      NEWS_APP_BASE_URL: ${NEWS_APP_BASE_URL}
+      NEWS_APP_SYNC_API_KEY: ${NEWS_APP_SYNC_API_KEY}
+      NEWS_APP_SYNC_BATCH_SIZE: ${NEWS_APP_SYNC_BATCH_SIZE}
+      NEWS_COLLECTOR_REPLAY_BATCH_SIZE: ${NEWS_COLLECTOR_REPLAY_BATCH_SIZE}
+      NEWSAPI_KEY: ${NEWSAPI_KEY}
+      GUARDIAN_API_KEY: ${GUARDIAN_API_KEY}
+      ALPHAVANTAGE_API_KEY: ${ALPHAVANTAGE_API_KEY}
+      PRODUCTHUNT_TOKEN: ${PRODUCTHUNT_TOKEN}
+      PYTHON_BIN: ${PYTHON_BIN}
+    depends_on:
+      - db
+    expose:
+      - "3000"
+    volumes:
+      - ./scripts/news_collector/data:/app/scripts/news_collector/data
+      - ./scripts/news_collector/output:/app/scripts/news_collector/output
+
+  scheduler:
+    build: .
+    restart: unless-stopped
+    environment:
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      DAILY_SYNC_CRON: ${DAILY_SYNC_CRON}
+      APP_TIMEZONE: ${APP_TIMEZONE}
+    command: ["sh", "/app/scripts/scheduler-entrypoint.sh"]
+    depends_on:
+      - web
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: signal_desk
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+volumes:
+  caddy_data:
+  caddy_config:
+  postgres_data:

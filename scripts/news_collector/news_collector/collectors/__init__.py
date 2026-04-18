@@ -1,0 +1,12 @@
+from news_collector.collectors.ap import APCollector
+from news_collector.collectors.alpha_vantage import AlphaVantageMoversCollector, AlphaVantageNewsCollector
+from news_collector.collectors.gdelt import GDELTCollector
+from news_collector.collectors.guardian import GuardianCollector
+from news_collector.collectors.hackernews import HackerNewsCollector
+from news_collector.collectors.newsapi import NewsAPICollector
+from news_collector.collectors.producthunt import ProductHuntCollector
+from news_collector.collectors.reddit import RedditCollector
+from news_collector.collectors.rss import RSSCollector
+from news_collector.collectors.techmeme import TechmemeCollector
+from news_collector.collectors.tldr import TLDRCollector
+from news_collector.collectors.x_search import XSearchCollector
