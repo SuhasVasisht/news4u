@@ -50,3 +50,7 @@ scripts/news_collector/data/*
 !scripts/news_collector/data/.gitkeep
 scripts/news_collector/output/*
 !scripts/news_collector/output/.gitkeep
+logs/scheduler/*
+!logs/scheduler/.gitkeep
+data/*
+!data/.gitkeep

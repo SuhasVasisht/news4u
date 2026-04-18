@@ -12,11 +12,13 @@ services:
       BASIC_AUTH_USER: ${BASIC_AUTH_USER}
       BASIC_AUTH_PASSWORD_HASH: ${BASIC_AUTH_PASSWORD_HASH}
     depends_on:
-      - web
+      web:
+        condition: service_healthy
 
   web:
     build: .
     restart: unless-stopped
+    command: ["sh", "/app/scripts/web-entrypoint.sh"]
     environment:
       DATABASE_URL: ${DATABASE_URL}
       SYNC_API_KEY: ${SYNC_API_KEY}
@@ -41,13 +43,24 @@ services:
       ALPHAVANTAGE_API_KEY: ${ALPHAVANTAGE_API_KEY}
       PRODUCTHUNT_TOKEN: ${PRODUCTHUNT_TOKEN}
       PYTHON_BIN: ${PYTHON_BIN}
+      STARTUP_CATCHUP_ENABLED: ${STARTUP_CATCHUP_ENABLED:-true}
+      STARTUP_CATCHUP_URL: ${STARTUP_CATCHUP_URL:-http://127.0.0.1:3000/api/internal/jobs/daily-sync}
+      RUN_DB_MIGRATIONS_ON_STARTUP: ${RUN_DB_MIGRATIONS_ON_STARTUP:-true}
+      WEB_STARTUP_HEALTH_RETRIES: ${WEB_STARTUP_HEALTH_RETRIES:-60}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     expose:
       - "3000"
     volumes:
       - ./scripts/news_collector/data:/app/scripts/news_collector/data
       - ./scripts/news_collector/output:/app/scripts/news_collector/output
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   scheduler:
     build: .
@@ -56,21 +69,29 @@ services:
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       DAILY_SYNC_CRON: ${DAILY_SYNC_CRON}
       APP_TIMEZONE: ${APP_TIMEZONE}
+    volumes:
+      - ./logs/scheduler:/var/log/news-app
     command: ["sh", "/app/scripts/scheduler-entrypoint.sh"]
     depends_on:
-      - web
+      web:
+        condition: service_healthy
 
   db:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: signal_desk
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-signal_desk}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   caddy_data:

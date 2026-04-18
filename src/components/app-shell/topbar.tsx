@@ -6,7 +6,7 @@ import { ThemeToggle } from "@/components/settings/theme-toggle";
 
 export function Topbar({ shellData }: { shellData: ShellData }) {
   return (
-    <div className="surface fade-in flex flex-col gap-4 rounded-[28px] px-5 py-4">
+    <div className="surface fade-in hidden flex-col gap-4 rounded-[28px] px-5 py-4 lg:flex">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.28em] text-muted">Daily desk</p>
@@ -28,7 +28,7 @@ export function Topbar({ shellData }: { shellData: ShellData }) {
         </form>
         {!shellData.user.isAuthenticated ? (
           <p className="text-sm text-muted">
-            Signed out: Today and Catch up use browser-only read/archive state.
+            Sign in to save preferences.
           </p>
         ) : (
           <p className="text-sm text-muted">

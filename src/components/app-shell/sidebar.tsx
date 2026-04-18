@@ -15,15 +15,8 @@ const navItems = [
 
 export function AppSidebar({ shellData }: { shellData: ShellData }) {
   return (
-    <aside className="surface fade-in flex w-full max-w-xs flex-col gap-6 rounded-[28px] p-5 lg:sticky lg:top-6 lg:h-[calc(100vh-3rem)]">
-      <div className="space-y-2">
-        <p className="text-xs uppercase tracking-[0.28em] text-muted">Signal Desk</p>
-        <h1 className="headline text-3xl text-ink">Finite daily feed, not endless churn.</h1>
-        <p className="text-sm leading-6 text-muted">
-          Stories are grouped into Today, Catch up, Saved, and Archived so the queue can actually close.
-        </p>
-      </div>
-
+    <aside className="surface fade-in hidden w-full max-w-xs flex-col gap-6 rounded-[28px] p-5 lg:sticky lg:top-6 lg:flex lg:h-[calc(100vh-3rem)]">
+      <p className="text-xs uppercase tracking-[0.28em] text-muted">News 4 u</p>
       <nav className="space-y-2">
         {navItems.map((item) => {
           const Icon = item.icon;

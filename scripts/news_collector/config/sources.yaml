@@ -187,7 +187,7 @@ collectors:
       - SECGov
   - name: producthunt
     type: producthunt
-    enabled: false
+    enabled: true
     category: tech
     limit: 20
   - name: reddit
@@ -204,7 +204,7 @@ collectors:
       - selfhosted
   - name: newsapi
     type: newsapi
-    enabled: false
+    enabled: true
     category: other
     queries:
       - technology

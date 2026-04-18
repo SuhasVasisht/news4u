@@ -13,6 +13,7 @@
     "test:e2e": "playwright test",
     "test:all": "npm test && npm run test:collector && npm run build && npm run test:e2e",
     "job:daily-sync": "tsx scripts/daily-sync.ts",
+    "startup:catchup": "tsx scripts/startup-catchup.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed.ts"
@@ -44,6 +45,7 @@
     "@types/react-dom": "^19",
     "@vitest/coverage-v8": "^4.1.4",
     "drizzle-kit": "^0.31.10",
+    "esbuild": "^0.28.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
     "jsdom": "^29.0.2",

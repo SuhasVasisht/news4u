@@ -32,3 +32,12 @@ test("critical routes render and anonymous controls respond", async ({ page }) =
   expect(pageErrors).toEqual([]);
   expect(failedResponses).toEqual([]);
 });
+
+test("mobile shell uses News 4 u branding without the old sidebar hero", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+
+  await expect(page.locator("div.lg\\:hidden").getByText("News 4 u")).toBeVisible();
+  await expect(page.getByText("Finite daily feed, not endless churn.")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /today/i }).first()).toBeVisible();
+});

@@ -28,6 +28,7 @@ The app lives at the repo root. The collector lives at `scripts/news_collector/`
 - a daily orchestration flow exposed by `POST /api/internal/jobs/daily-sync`
 - a CLI entrypoint at `npm run job:daily-sync`
 - a Docker scheduler service that triggers the job at `5:05 AM` in `America/Los_Angeles`
+- startup catch-up on `web` boot if the current feed run is missing
 
 ## Repo Layout
 
@@ -35,16 +36,21 @@ The app lives at the repo root. The collector lives at `scripts/news_collector/`
 .
 ├── src/                          # Next.js app
 ├── drizzle/                      # SQL migrations
+├── data/                         # local ignored runtime data
+├── logs/                         # local ignored runtime logs
 ├── scripts/
 │   ├── daily-sync.ts             # Manual app-side job runner
 │   ├── migrate.ts                # DB migration runner
 │   ├── seed.ts                   # Seed script
 │   ├── scheduler-entrypoint.sh   # Cron bootstrap for Docker scheduler
+│   ├── startup-catchup.ts        # Boot-time missed-run trigger
+│   ├── web-entrypoint.sh         # Container startup wrapper
 │   └── news_collector/           # Python collector project
 ├── tests/                        # App/unit/e2e tests
 ├── docker-compose.yml
 ├── Dockerfile
-└── .env.example
+├── .env.example
+└── .env.production.example
 ```
 
 ## Daily Sync Architecture
@@ -59,11 +65,14 @@ The daily sync job is the integration point between the app and collector.
 4. Run app feed cleanup
 5. Force-refresh the app feed for the current Pacific feed date
 
+The publish step does not write directly to Postgres. It posts article batches to the app’s internal sync API, and the app persists them into Postgres.
+
 ### Entry points
 
 - HTTP: `POST /api/internal/jobs/daily-sync`
 - CLI: `npm run job:daily-sync`
 - Scheduled: Docker `scheduler` service calls the HTTP endpoint on cron
+- Boot recovery: `web` runs `npm run startup:catchup` after startup if the current feed run is missing
 
 ### Auth
 
@@ -75,12 +84,24 @@ The daily sync job is the integration point between the app and collector.
 
 The daily-sync route rejects overlapping runs with `409` while another run is active.
 
+### Durability model
+
+- app data is stored in Postgres
+- collector state and caches are stored under `scripts/news_collector/data/`
+- collector digests and sync outbox bundles are stored under `scripts/news_collector/output/`
+- Docker Postgres persistence comes from the named volume `postgres_data`
+
+This is durable across container restarts, but not a substitute for real backups.
+
 ## Environment Variables
 
-Copy `.env.example` to `.env` for Docker or `.env.local` / `.env` for local development.
+Copy `.env.example` to `.env` for local or Docker development. Use `.env.production.example` as the base for a production deployment.
 
 ### Core app env
 
+- `POSTGRES_DB`: Postgres database name for Compose deployments
+- `POSTGRES_USER`: Postgres username for Compose deployments
+- `POSTGRES_PASSWORD`: Postgres password for Compose deployments
 - `DATABASE_URL`: Postgres connection string
 - `SYNC_API_KEY`: app sync bearer token for article ingestion
 - `INTERNAL_API_KEY`: app internal job/feed token
@@ -93,6 +114,10 @@ Copy `.env.example` to `.env` for Docker or `.env.local` / `.env` for local deve
 ### Scheduler env
 
 - `DAILY_SYNC_CRON`: cron expression for scheduled daily sync, defaults to `5 5 * * *`
+- `RUN_DB_MIGRATIONS_ON_STARTUP`: run DB migrations during web container boot
+- `STARTUP_CATCHUP_ENABLED`: trigger a missed daily sync on app startup when needed
+- `STARTUP_CATCHUP_URL`: internal endpoint used by startup catch-up
+- `WEB_STARTUP_HEALTH_RETRIES`: max retries while waiting for the web app to become healthy on boot
 
 ### Collector env
 
@@ -121,6 +146,16 @@ PYTHON_BIN=scripts/news_collector/.venv/bin/python
 ```
 
 In Docker you should leave `PYTHON_BIN` empty so the container uses its installed `python3`.
+
+### Production env recommendation
+
+Start from:
+
+```bash
+cp .env.production.example .env
+```
+
+Then replace all placeholder credentials before starting the stack.
 
 ## Local Development
 
@@ -203,6 +238,7 @@ python -m news_collector.jobs.bootstrap_reddit_session
 
 ```bash
 npm run job:daily-sync
+npm run startup:catchup
 ```
 
 ### HTTP-triggered run
@@ -228,8 +264,9 @@ This is the preferred deployment model when moving the repo to another machine.
 ```bash
 cp .env.example .env
 docker compose up --build -d
-docker compose exec web npm run db:migrate
 ```
+
+The `web` container now runs migrations automatically on startup by default.
 
 ### Services
 
@@ -244,14 +281,26 @@ Repo-local runtime data is stored in ignored paths:
 
 - `scripts/news_collector/data/`
 - `scripts/news_collector/output/`
+- `logs/scheduler/`
 
 Those should be preserved when moving machines if you want to keep collector state, digests, sync outbox history, and browser session profiles.
+
+Postgres data is stored in the Docker named volume `postgres_data`.
+
+### Health and startup behavior
+
+- `db` has a `pg_isready` health check
+- `web` has an `/api/health` health check
+- `scheduler` waits for `web` to become healthy
+- `proxy` waits for `web` to become healthy
+- `web` runs boot-time catch-up to avoid missing a daily run just because the scheduler was down at 5:05 AM PT
 
 ### Notes
 
 - `NEWS_APP_BASE_URL` should remain `http://127.0.0.1:3000` inside the app container for self-calls during publish.
 - `scheduler` posts to `http://web:3000/api/internal/jobs/daily-sync`.
 - `proxy` fronts the app with Caddy and basic auth.
+- `syncArticles()` is transactional so a partial batch does not commit halfway through.
 
 ## Optional Browser-Backed Sources
 
@@ -350,15 +399,24 @@ npm run test:e2e
 npm run test:all
 ```
 
+### Docker verification
+
+```bash
+docker compose ps
+docker compose logs --tail=100 web
+docker compose logs --tail=100 scheduler
+curl -u "${BASIC_AUTH_USER}:<password>" http://127.0.0.1/api/health
+```
+
 ## Common Workflows
 
 ### Fresh machine setup
 
 1. Clone repo
-2. Copy `.env.example` to `.env`
+2. Copy `.env.example` to `.env` or `.env.production.example` to `.env`
 3. Fill in secrets and API keys
 4. Start Docker Compose or install local Node/Python deps
-5. Run migrations
+5. Let web startup run migrations, or run them manually if you disabled startup migrations
 6. Bootstrap X/Reddit sessions if you need those sources
 7. Trigger `npm run job:daily-sync` or call the internal route once to verify
 
@@ -369,6 +427,7 @@ npm run test:all
 3. check `scripts/news_collector/output/`
 4. check `scripts/news_collector/output/sync/`
 5. check `GET /api/feed/today`
+6. check `logs/scheduler/daily-sync.log` after the scheduled window if using Docker cron
 
 ## Troubleshooting
 
@@ -405,6 +464,24 @@ Check:
 - `APP_TIMEZONE`
 - `INTERNAL_API_KEY`
 - scheduler container logs
+- `logs/scheduler/daily-sync.log`
+
+### App boots but Auth.js logs `UntrustedHost`
+
+Set the appropriate trusted host variables for your deployment before relying on auth in production. The current stack can still sync news, but auth host configuration should be completed separately.
+
+### Web startup catch-up does not run
+
+Check:
+
+- `STARTUP_CATCHUP_ENABLED`
+- `STARTUP_CATCHUP_URL`
+- `INTERNAL_API_KEY`
+- web container logs during boot
+
+### Postgres survives restarts but not host loss
+
+That is expected with the current Docker volume setup. Add external backups or managed Postgres if you need production-grade recovery.
 
 ## Current Defaults
 
@@ -413,3 +490,5 @@ Check:
 - scheduled sync: `5:05 AM PT`
 - app root: repo root
 - collector root: `scripts/news_collector`
+- scheduler logs: `logs/scheduler/`
+- Docker DB volume: `postgres_data`

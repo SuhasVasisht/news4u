@@ -19,7 +19,7 @@ export function ArticleCard({
   const isAnonymous = !story.viewerState.storyId || anonymousStateKey === "anonymous";
 
   return (
-    <article className="surface rounded-[28px] p-5">
+    <article className="surface rounded-[24px] p-4 md:rounded-[28px] md:p-5">
       <div className="flex flex-wrap items-center gap-2">
         <Badge>{story.representativeArticle.source.name}</Badge>
         {story.topics.map((topic) => (
@@ -47,7 +47,7 @@ export function ArticleCard({
             {story.viewerState.isSaved ? <span>Saved</span> : null}
           </div>
           <Link href={`/story/${story.id}`} className="block">
-            <h2 className="headline text-3xl leading-tight text-ink hover:text-accent">
+            <h2 className="headline text-2xl leading-tight text-ink hover:text-accent md:text-3xl">
               {story.canonicalHeadline}
             </h2>
           </Link>

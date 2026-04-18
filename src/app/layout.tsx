@@ -15,7 +15,7 @@ const display = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: "Signal Desk",
+  title: "News 4 u",
   description: "A self-hosted personal news desk for fast scanning and deep reading.",
 };
 

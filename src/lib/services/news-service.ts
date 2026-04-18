@@ -206,7 +206,7 @@ function addDays(dateKey: string, delta: number) {
   return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}-${String(next.getUTCDate()).padStart(2, "0")}`;
 }
 
-function currentFeedDate(now = new Date()) {
+export function currentFeedDate(now = new Date()) {
   const parts = normalizedParts(now);
   const today = toDateKey(parts);
   return parts.hour < APP_DAILY_RESET_HOUR ? addDays(today, -1) : today;
@@ -1939,101 +1939,103 @@ export async function syncArticles(items: SyncArticleInput[]) {
 
       let inserted = 0;
       let updated = 0;
-      for (const item of items) {
-        await db
-          .insert(sources)
-          .values({
-            slug: item.source.slug,
-            name: item.source.name,
-            homepageUrl: item.source.homepage_url ?? null,
-            iconUrl: item.source.icon_url ?? null,
-            domain: (() => {
-              try {
-                return new URL(item.url).hostname;
-              } catch {
-                return null;
-              }
-            })(),
-            updatedAt: new Date(),
-          })
-          .onConflictDoUpdate({
-            target: sources.slug,
-            set: {
+      await db.transaction(async (tx) => {
+        for (const item of items) {
+          await tx
+            .insert(sources)
+            .values({
+              slug: item.source.slug,
               name: item.source.name,
               homepageUrl: item.source.homepage_url ?? null,
               iconUrl: item.source.icon_url ?? null,
-              updatedAt: new Date(),
-            },
-          });
-        const source = (await db.select().from(sources).where(eq(sources.slug, item.source.slug)))[0];
-        const existing = (
-          await db
-            .select()
-            .from(articles)
-            .where(and(eq(articles.sourceId, source.id), eq(articles.externalId, item.external_id)))
-        )[0];
-
-        let articleId = existing?.id ?? uuid();
-        if (existing) {
-          await db
-            .update(articles)
-            .set({
-              title: item.title,
-              summary: item.summary,
-              author: item.author ?? null,
-              url: item.url,
-              imageUrl: item.image_url ?? null,
-              publishedAt: new Date(item.published_at),
-              contentText: item.content_text,
-              score: item.score ?? 0,
-              payloadJson: item.payload_json ?? null,
+              domain: (() => {
+                try {
+                  return new URL(item.url).hostname;
+                } catch {
+                  return null;
+                }
+              })(),
               updatedAt: new Date(),
             })
-            .where(eq(articles.id, existing.id));
-          updated += 1;
-        } else {
-          const insertedRow = await db
-            .insert(articles)
-            .values({
-              id: articleId,
-              sourceId: source.id,
-              externalId: item.external_id,
-              title: item.title,
-              summary: item.summary,
-              author: item.author ?? null,
-              url: item.url,
-              imageUrl: item.image_url ?? null,
-              publishedAt: new Date(item.published_at),
-              ingestedAt: new Date(),
-              contentText: item.content_text,
-              score: item.score ?? 0,
-              payloadJson: item.payload_json ?? null,
-              updatedAt: new Date(),
-            })
-            .returning();
-          articleId = insertedRow[0].id;
-          inserted += 1;
-        }
-
-        for (const topic of item.topics) {
-          await db
-            .insert(topics)
-            .values({ slug: topic.slug, name: topic.name, updatedAt: new Date() })
             .onConflictDoUpdate({
-              target: topics.slug,
-              set: { name: topic.name, updatedAt: new Date() },
+              target: sources.slug,
+              set: {
+                name: item.source.name,
+                homepageUrl: item.source.homepage_url ?? null,
+                iconUrl: item.source.icon_url ?? null,
+                updatedAt: new Date(),
+              },
             });
+          const source = (await tx.select().from(sources).where(eq(sources.slug, item.source.slug)))[0];
+          const existing = (
+            await tx
+              .select()
+              .from(articles)
+              .where(and(eq(articles.sourceId, source.id), eq(articles.externalId, item.external_id)))
+          )[0];
+
+          let articleId = existing?.id ?? uuid();
+          if (existing) {
+            await tx
+              .update(articles)
+              .set({
+                title: item.title,
+                summary: item.summary,
+                author: item.author ?? null,
+                url: item.url,
+                imageUrl: item.image_url ?? null,
+                publishedAt: new Date(item.published_at),
+                contentText: item.content_text,
+                score: item.score ?? 0,
+                payloadJson: item.payload_json ?? null,
+                updatedAt: new Date(),
+              })
+              .where(eq(articles.id, existing.id));
+            updated += 1;
+          } else {
+            const insertedRow = await tx
+              .insert(articles)
+              .values({
+                id: articleId,
+                sourceId: source.id,
+                externalId: item.external_id,
+                title: item.title,
+                summary: item.summary,
+                author: item.author ?? null,
+                url: item.url,
+                imageUrl: item.image_url ?? null,
+                publishedAt: new Date(item.published_at),
+                ingestedAt: new Date(),
+                contentText: item.content_text,
+                score: item.score ?? 0,
+                payloadJson: item.payload_json ?? null,
+                updatedAt: new Date(),
+              })
+              .returning();
+            articleId = insertedRow[0].id;
+            inserted += 1;
+          }
+
+          for (const topic of item.topics) {
+            await tx
+              .insert(topics)
+              .values({ slug: topic.slug, name: topic.name, updatedAt: new Date() })
+              .onConflictDoUpdate({
+                target: topics.slug,
+                set: { name: topic.name, updatedAt: new Date() },
+              });
+          }
+          const topicRows = item.topics.length
+            ? await tx.select().from(topics).where(inArray(topics.slug, item.topics.map((topic) => topic.slug)))
+            : [];
+          await tx.delete(articleTopics).where(eq(articleTopics.articleId, articleId));
+          if (topicRows.length > 0) {
+            await tx.insert(articleTopics).values(
+              topicRows.map((topic) => ({ articleId, topicId: topic.id })),
+            );
+          }
         }
-        const topicRows = item.topics.length
-          ? await db.select().from(topics).where(inArray(topics.slug, item.topics.map((topic) => topic.slug)))
-          : [];
-        await db.delete(articleTopics).where(eq(articleTopics.articleId, articleId));
-        if (topicRows.length > 0) {
-          await db.insert(articleTopics).values(
-            topicRows.map((topic) => ({ articleId, topicId: topic.id })),
-          );
-        }
-      }
+      });
 
       await ensureStoriesBackfilled();
       await ensureFeedRunForDate(currentFeedDate());

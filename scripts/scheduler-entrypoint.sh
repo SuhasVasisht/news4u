@@ -7,10 +7,10 @@ set -eu
 
 export TZ="$APP_TIMEZONE"
 
-mkdir -p /var/log
+mkdir -p /var/log/news-app
 
 cat > /etc/cron.d/news-app-daily-sync <<EOF
-${DAILY_SYNC_CRON} root /bin/sh -lc 'curl -fsS -X POST -H "Authorization: Bearer ${INTERNAL_API_KEY}" http://web:3000/api/internal/jobs/daily-sync >> /var/log/daily-sync.log 2>&1'
+${DAILY_SYNC_CRON} root /bin/sh -lc 'curl -fsS -X POST -H "Authorization: Bearer ${INTERNAL_API_KEY}" http://web:3000/api/internal/jobs/daily-sync >> /var/log/news-app/daily-sync.log 2>&1'
 EOF
 chmod 0644 /etc/cron.d/news-app-daily-sync
 
