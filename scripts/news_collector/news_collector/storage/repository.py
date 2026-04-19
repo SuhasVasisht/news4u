@@ -219,6 +219,26 @@ class Repository:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def fetch_recent_raw_items_by_source(
+        self,
+        source: str,
+        limit: int = 25,
+        limit_hours: int = 168,
+    ) -> list[dict[str, Any]]:
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM raw_items
+                WHERE source = ?
+                  AND (published_at IS NULL OR published_at >= datetime('now', ?))
+                ORDER BY COALESCE(published_at, fetched_at) DESC, id DESC
+                LIMIT ?
+                """,
+                (source, f"-{limit_hours} hours", limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def fetch_all_raw_items(self, limit: int, offset: int = 0) -> list[dict[str, Any]]:
         with self.db.connect() as conn:
             rows = conn.execute(

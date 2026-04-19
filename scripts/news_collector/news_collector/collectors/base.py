@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
+import json
 
 from news_collector.models import RawItem
 from news_collector.pipeline.extract import extract_image_from_page_html, extract_text_from_html, first_image_url
@@ -39,6 +40,7 @@ class BaseCollector:
 
     def __init__(self, context: CollectorContext):
         self.context = context
+        self._force_run = False
         timeout = float(context.defaults.get("request_timeout_seconds", 20))
         self.client = get_http_client(context.settings.user_agent, timeout=timeout)
 
@@ -62,6 +64,56 @@ class BaseCollector:
 
     def now_iso(self) -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    def cached_items(self, max_age_hours: float = 72.0) -> list[RawItem]:
+        state = self.get_state()
+        cached_at = state.get("last_success_items_at")
+        serialized = state.get("last_success_items")
+        items: list[RawItem] = []
+        if cached_at and isinstance(serialized, list):
+            try:
+                age = datetime.now(timezone.utc) - datetime.fromisoformat(cached_at)
+            except ValueError:
+                age = None
+            if age is not None and age <= timedelta(hours=max_age_hours):
+                for payload in serialized:
+                    try:
+                        items.append(RawItem.model_validate(payload))
+                    except Exception:
+                        continue
+        if items:
+            return items
+        fallback_rows = self.repository.fetch_recent_raw_items_by_source(
+            self.name,
+            limit=25,
+            limit_hours=int(max_age_hours),
+        )
+        for row in fallback_rows:
+            try:
+                items.append(
+                    RawItem(
+                        source=row["source"],
+                        source_type=row["source_type"],
+                        category=row["category"],
+                        external_id=row.get("external_id"),
+                        title=row["title"],
+                        url=row["url"],
+                        published_at=datetime.fromisoformat(row["published_at"]) if row.get("published_at") else None,
+                        author=row.get("author"),
+                        summary=row.get("summary"),
+                        image_url=row.get("image_url"),
+                        text=row.get("text"),
+                        tags=json.loads(row.get("tags_json") or "[]"),
+                        symbols=json.loads(row.get("symbols_json") or "[]"),
+                        entities=json.loads(row.get("entities_json") or "[]"),
+                        engagement=json.loads(row.get("engagement_json") or "{}"),
+                        raw=json.loads(row.get("raw_json") or "{}"),
+                        fetched_at=datetime.fromisoformat(row["fetched_at"]),
+                    )
+                )
+            except Exception:
+                continue
+        return items
 
     def is_in_cooldown(self, state: dict[str, Any]) -> tuple[bool, str | None]:
         cooldown_until = state.get("cooldown_until")
@@ -105,6 +157,7 @@ class BaseCollector:
 
     def run(self, force: bool = False) -> CollectorRunResult:
         state = self.get_state()
+        self._force_run = force
         if not force:
             in_cooldown, until = self.is_in_cooldown(state)
             if in_cooldown:
@@ -129,14 +182,19 @@ class BaseCollector:
             return CollectorRunResult(self.name, "degraded", reason=str(exc), stats=state)
         except Exception as exc:
             return CollectorRunResult(self.name, "error", reason=str(exc), stats=state)
+        finally:
+            self._force_run = False
 
+        state = self.get_state()
+        if items:
+            state["last_success_items_at"] = self.now_iso()
+            state["last_success_items"] = [item.model_dump(mode="json") for item in items[:25]]
         if not force:
-            state = self.get_state()
             state["last_success_at"] = self.now_iso()
             state["cooldown_until"] = None
             state["last_reason"] = None
             state["consecutive_zero_runs"] = int(state.get("consecutive_zero_runs", 0)) + (0 if items else 1)
-            self.set_state(state)
+        self.set_state(state)
         return CollectorRunResult(
             self.name,
             "ok" if items else "degraded",

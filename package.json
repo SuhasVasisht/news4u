@@ -12,6 +12,7 @@
     "test:collector": "scripts/news_collector/.venv/bin/python -m pytest scripts/news_collector/tests",
     "test:e2e": "playwright test",
     "test:all": "npm test && npm run test:collector && npm run build && npm run test:e2e",
+    "audit:data-pipeline": "tsx scripts/audit-data-pipeline.ts",
     "job:daily-sync": "tsx scripts/daily-sync.ts",
     "startup:catchup": "tsx scripts/startup-catchup.ts",
     "db:generate": "drizzle-kit generate",

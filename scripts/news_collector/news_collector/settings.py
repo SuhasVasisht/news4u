@@ -24,8 +24,7 @@ class Settings:
     replay_batch_size: int = 200
 
 
-def load_dotenv(project_root: Path) -> None:
-    env_path = project_root / ".env"
+def load_dotenv(env_path: Path) -> None:
     if not env_path.exists():
         return
     for line in env_path.read_text().splitlines():
@@ -38,7 +37,9 @@ def load_dotenv(project_root: Path) -> None:
 
 def get_settings() -> Settings:
     project_root = Path(__file__).resolve().parent.parent
-    load_dotenv(project_root)
+    repo_root = project_root.parent.parent
+    load_dotenv(repo_root / ".env")
+    load_dotenv(project_root / ".env")
     db_path = Path(os.environ.get("NEWS_COLLECTOR_DB_PATH", project_root / "data/news_collector.db"))
     output_dir = Path(os.environ.get("NEWS_COLLECTOR_OUTPUT_DIR", project_root / "output"))
     sync_outbox_dir = Path(os.environ.get("NEWS_COLLECTOR_SYNC_OUTBOX_DIR", output_dir / "sync"))

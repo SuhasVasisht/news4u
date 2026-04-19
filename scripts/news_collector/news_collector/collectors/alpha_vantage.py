@@ -24,6 +24,9 @@ class AlphaVantageNewsCollector(BaseCollector):
             response.raise_for_status()
             payload = response.json()
             if payload.get("Information"):
+                cached = self.cached_items()
+                if cached:
+                    return cached
                 raise CollectorDegraded(payload["Information"])
             for article in payload.get("feed", []):
                 title = article.get("title", "")
@@ -60,6 +63,11 @@ class AlphaVantageMoversCollector(BaseCollector):
         )
         response.raise_for_status()
         payload = response.json()
+        if payload.get("Information"):
+            cached = self.cached_items()
+            if cached:
+                return cached
+            raise CollectorDegraded(payload["Information"])
         items: list[RawItem] = []
         for bucket in ("top_gainers", "top_losers", "most_actively_traded"):
             for entry in payload.get(bucket, [])[:10]:
@@ -83,4 +91,8 @@ class AlphaVantageMoversCollector(BaseCollector):
                         raw={"bucket": bucket, "metadata": payload.get("metadata"), "entry": entry},
                     )
                 )
+        if not items:
+            cached = self.cached_items()
+            if cached:
+                return cached
         return items

@@ -27,19 +27,24 @@ class APCollector(BaseCollector):
 
     def collect(self) -> list[RawItem]:
         state = self.get_state()
-        seen_urls = set(state.get("seen_urls", []))
+        seen_urls = set() if self._force_run else set(state.get("seen_urls", []))
         response = self.client.get(self.context.config["url"])
         response.raise_for_status()
         if self._is_challenge_page(response.text):
             raise CollectorDegraded("AP hub returned challenge page")
-        urls = list(dict.fromkeys(re.findall(r"https://apnews\.com/article/[A-Za-z0-9_-]+", response.text)))
+        urls = list(
+            dict.fromkeys(
+                re.findall(r"href=['\"](https://apnews\.com/article/[A-Za-z0-9_-]+)['\"]", response.text)
+                or re.findall(r"https://apnews\.com/article/[A-Za-z0-9_-]+", response.text)
+            )
+        )
         items: list[RawItem] = []
         stale_count = 0
         max_requests = int(self.context.config.get("max_requests_per_run", 8))
         for article_url in urls:
             if article_url in seen_urls:
                 stale_count += 1
-                if stale_count >= 2:
+                if not self._force_run and stale_count >= 2:
                     break
                 continue
             article_response = self.client.get(article_url)
@@ -77,10 +82,11 @@ class APCollector(BaseCollector):
             seen_urls.add(article_url)
             if len(items) >= max_requests:
                 break
-            self.sleep_range(
-                float(self.context.config.get("min_request_delay_seconds", 0)),
-                float(self.context.config.get("max_request_delay_seconds", 0)),
-            )
+            if not self._force_run:
+                self.sleep_range(
+                    float(self.context.config.get("min_request_delay_seconds", 0)),
+                    float(self.context.config.get("max_request_delay_seconds", 0)),
+                )
         state["seen_urls"] = list(seen_urls)[-100:]
         self.set_state(state)
         return items

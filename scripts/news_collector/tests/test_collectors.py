@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import replace
 
 from news_collector.collectors.ap import APCollector
+from news_collector.collectors.alpha_vantage import AlphaVantageNewsCollector
 from news_collector.collectors.base import CollectorContext
+from news_collector.collectors.gdelt import GDELTCollector
+from news_collector.collectors.newsapi import NewsAPICollector
 from news_collector.collectors.producthunt import ProductHuntCollector
 from news_collector.collectors.reddit import RedditCollector
 from news_collector.collectors.rss import RSSCollector
@@ -90,6 +93,50 @@ def test_rss_collector_prefers_media_thumbnail(tmp_path):
     assert items[0].image_url == "https://example.com/thumb.jpg"
 
 
+def test_rss_collector_falls_back_to_arxiv_api_when_rss_is_empty(tmp_path):
+    collector = RSSCollector(
+        CollectorContext(
+            name="arxiv_cs_ai",
+            config={"url": "https://arxiv.org/rss/cs.AI", "category": "tech"},
+            defaults={"request_timeout_seconds": 5},
+            settings=make_settings(tmp_path),
+            repository=make_repository(tmp_path),
+        )
+    )
+    collector.client = FakeClient(
+        {
+            "https://arxiv.org/rss/cs.AI": FakeResponse(
+                text="""<?xml version="1.0"?><rss><channel><title>cs.AI</title></channel></rss>"""
+            ),
+            (
+                "https://export.arxiv.org/api/query",
+                (
+                    ("max_results", 10),
+                    ("search_query", "cat:cs.AI"),
+                    ("sortBy", "submittedDate"),
+                    ("sortOrder", "descending"),
+                    ("start", 0),
+                ),
+            ): FakeResponse(
+                text="""<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">
+                <entry>
+                  <id>https://arxiv.org/abs/2604.00001</id>
+                  <updated>2026-04-18T12:00:00Z</updated>
+                  <published>2026-04-18T12:00:00Z</published>
+                  <title>Reasoning Agents</title>
+                  <summary>Paper abstract.</summary>
+                  <author><name>Jane Doe</name></author>
+                </entry>
+                </feed>"""
+            ),
+        }
+    )
+    items = collector.collect()
+    assert len(items) == 1
+    assert items[0].title == "Reasoning Agents"
+    assert items[0].text == "Paper abstract."
+
+
 def test_tldr_collector_extracts_embedded_json(tmp_path):
     repository = make_repository(tmp_path)
     collector = TLDRCollector(
@@ -127,7 +174,7 @@ def test_ap_collector_discovers_articles_from_hub(tmp_path):
     )
     hub_html = """
     <html><body>
-    https://apnews.com/article/example-story-1234567890abcdef
+    <a href='https://apnews.com/article/example-story-1234567890abcdef'>story</a>
     </body></html>
     """
     article_html = """
@@ -150,6 +197,135 @@ def test_ap_collector_discovers_articles_from_hub(tmp_path):
     assert items[0].summary == "AP summary"
     assert items[0].image_url == "https://example.com/ap.jpg"
     assert collector.get_state()["seen_urls"] == ["https://apnews.com/article/example-story-1234567890abcdef"]
+
+
+def test_ap_collector_force_run_ignores_seen_urls(tmp_path):
+    collector = APCollector(
+        CollectorContext(
+            name="ap_top_news",
+            config={"url": "https://apnews.com/hub/apf-topnews", "category": "world", "max_requests_per_run": 2},
+            defaults={"request_timeout_seconds": 5},
+            settings=make_settings(tmp_path),
+            repository=make_repository(tmp_path),
+        )
+    )
+    collector.set_state({"seen_urls": ["https://apnews.com/article/example-story-1234567890abcdef"]})
+    collector._force_run = True
+    collector.client = FakeClient(
+        {
+            "https://apnews.com/hub/apf-topnews": FakeResponse(
+                text="<html><body><a href='https://apnews.com/article/example-story-1234567890abcdef'>story</a></body></html>"
+            ),
+            "https://apnews.com/article/example-story-1234567890abcdef": FakeResponse(
+                text="""<html><head><title>Example Story | AP News</title><meta name="description" content="AP summary"/></head></html>"""
+            ),
+        }
+    )
+    items = collector.collect()
+    assert len(items) == 1
+
+
+def test_gdelt_collector_wraps_or_queries(tmp_path):
+    collector = GDELTCollector(
+        CollectorContext(
+            name="gdelt",
+            config={"category": "world", "queries": ["ai OR semiconductor OR cloud"]},
+            defaults={"request_timeout_seconds": 5, "gdelt_min_interval_seconds": 0},
+            settings=make_settings(tmp_path),
+            repository=make_repository(tmp_path),
+        )
+    )
+    collector.client = FakeClient(
+        {
+            (
+                "https://api.gdeltproject.org/api/v2/doc/doc",
+                (
+                    ("format", "json"),
+                    ("maxrecords", 10),
+                    ("mode", "artlist"),
+                    ("query", "(ai OR semiconductor OR cloud)"),
+                ),
+            ): FakeResponse(json_data={"articles": []})
+        }
+    )
+    assert collector.collect() == []
+
+
+def test_newsapi_collector_filters_low_signal_articles(tmp_path):
+    settings = replace(make_settings(tmp_path), newsapi_key="token")
+    collector = NewsAPICollector(
+        CollectorContext(
+            name="newsapi",
+            config={"category": "other", "queries": ["technology", "finance"]},
+            defaults={"request_timeout_seconds": 5},
+            settings=settings,
+            repository=make_repository(tmp_path),
+        )
+    )
+    collector.client = FakeClient(
+        {
+            (
+                "https://newsapi.org/v2/everything",
+                (("apiKey", "token"), ("language", "en"), ("pageSize", 10), ("q", "technology"), ("sortBy", "publishedAt")),
+            ): FakeResponse(
+                json_data={
+                    "articles": [
+                        {"title": "Pennsylvania Sportswatch Daily Listings", "description": "Schedule", "url": "https://example.com/junk", "publishedAt": "2026-04-18T12:00:00Z", "source": {"name": "AP Sports"}},
+                        {"title": "OpenAI expands inference stack", "description": "Cloud and GPU demand rise", "url": "https://example.com/good", "publishedAt": "2026-04-18T12:00:00Z", "source": {"name": "Tech Desk"}},
+                    ]
+                }
+            ),
+            (
+                "https://newsapi.org/v2/everything",
+                (("apiKey", "token"), ("language", "en"), ("pageSize", 10), ("q", "finance"), ("sortBy", "publishedAt")),
+            ): FakeResponse(json_data={"articles": []}),
+            "https://example.com/good": FakeResponse(text="<html></html>"),
+        }
+    )
+    items = collector.collect()
+    assert len(items) == 1
+    assert items[0].title == "OpenAI expands inference stack"
+
+
+def test_alpha_vantage_news_uses_cached_items_when_rate_limited(tmp_path):
+    collector = AlphaVantageNewsCollector(
+        CollectorContext(
+            name="alphavantage_news",
+            config={"category": "finance", "topics": ["technology"]},
+            defaults={"request_timeout_seconds": 5},
+            settings=make_settings(tmp_path),
+            repository=make_repository(tmp_path),
+        )
+    )
+    collector.set_state(
+        {
+            "last_success_items_at": "2026-04-18T12:00:00+00:00",
+            "last_success_items": [
+                {
+                    "source": "alphavantage_news",
+                    "source_type": "api",
+                    "category": "tech",
+                    "title": "Cached market story",
+                    "url": "https://example.com/cached",
+                    "summary": "Cached summary",
+                    "text": "Cached summary",
+                    "raw": {},
+                    "fetched_at": "2026-04-18T12:00:00+00:00",
+                }
+            ],
+        }
+    )
+    collector.client = FakeClient(
+        {
+            (
+                "https://www.alphavantage.co/query",
+                (("apikey", "demo"), ("function", "NEWS_SENTIMENT"), ("limit", 10), ("topics", "technology")),
+            ): FakeResponse(json_data={"Information": "rate limit"})
+        }
+    )
+    items = collector.collect()
+    assert len(items) == 1
+    assert items[0].title == "Cached market story"
 
 
 def test_techmeme_collector_parses_primary_link_and_image(tmp_path):

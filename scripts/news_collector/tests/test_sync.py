@@ -105,9 +105,11 @@ def test_build_sync_article_uses_topic_mapping_and_fallback_text(tmp_path):
         "raw_json": json.dumps({}),
         "fetched_at": "2026-04-17T08:05:00+00:00",
     }
-    payload = build_sync_article(raw_item_from_row(row), used_page_fetch=False)
+    payload = build_sync_article(raw_item_from_row(row), used_page_fetch=False, trust_score=0.88)
     assert payload["content_text"] == "Policy shift summary"
     assert payload["published_at"] == "2026-04-17T08:00:00Z"
+    assert payload["payload_json"]["collector"]["trust_score"] == 0.88
+    assert payload["payload_json"]["collector"]["importance_score"] > 0
     assert payload["topics"] == [
         {"slug": "policy", "name": "Policy"},
         {"slug": "technology", "name": "Technology"},
@@ -135,10 +137,14 @@ def test_publish_articles_writes_outbox_and_refreshes_feed_dates(tmp_path, monke
     )
     monkeypatch.setattr("news_collector.sync.get_http_client", lambda *args, **kwargs: client)
 
-    result = publish_articles(repository, settings, [row], batch_label="test-batch")
+    result = publish_articles(repository, settings, [row], trust_scores={"techcrunch": 0.86}, batch_label="test-batch")
     assert result.received == 1
-    manifest_path = settings.sync_outbox_dir / next(settings.sync_outbox_dir.iterdir()).name / "manifest.json"
+    outbox_dir = settings.sync_outbox_dir / next(settings.sync_outbox_dir.iterdir()).name
+    manifest_path = outbox_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["article_count"] == 1
     assert manifest["attempt_count"] == 1
     assert manifest["delivered_at"] is not None
+    payload = json.loads((outbox_dir / "articles.json").read_text())
+    assert payload["articles"][0]["payload_json"]["collector"]["trust_score"] == 0.86
+    assert payload["articles"][0]["payload_json"]["collector"]["importance_score"] > 0

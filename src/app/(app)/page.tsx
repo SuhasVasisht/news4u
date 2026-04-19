@@ -18,10 +18,10 @@ export default async function HomePage() {
         <div className="mt-3 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
             <h1 className="headline text-3xl leading-tight text-ink md:text-5xl">
-              Today is finite, stable, and meant to actually clear.
+              The highest-signal stories for today, with tech leading the mix.
             </h1>
             <p className="mt-4 max-w-2xl text-base leading-7 text-muted">
-              Important stories stay prominent. Everything else fits in a single day-sized queue.
+              Major stories stay on top, lower-quality items stay out, and the rest of the queue is built to clear in one day.
             </p>
           </div>
           <ClearTodayButton disabled={!isAuthenticated} initialCleared={feed.cleared} />

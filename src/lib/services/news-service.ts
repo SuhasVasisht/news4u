@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
-import { and, asc, desc, eq, inArray, lt, ne } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, lt, ne } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb, hasDatabase } from "@/lib/db/client";
+import { collectorImportanceToArticleScore } from "@/lib/scoring";
 import {
   articleTopics,
   articles,
@@ -36,7 +37,7 @@ import type {
   ViewerStoryState,
 } from "@/lib/types";
 
-const ALGORITHM_VERSION = "v1";
+const ALGORITHM_VERSION = "v2";
 const IMPORTANT_LIMIT = 8;
 const OTHER_LIMIT = 20;
 const CATCHUP_TOTAL_LIMIT = 8;
@@ -44,6 +45,8 @@ const CATCHUP_PER_DAY_LIMIT = 3;
 const MAX_CARRYOVERS = 2;
 const APP_TIMEZONE = process.env.APP_TIMEZONE ?? "America/Los_Angeles";
 const APP_DAILY_RESET_HOUR = Number(process.env.APP_DAILY_RESET_HOUR ?? 5);
+const TECH_TOPIC_SLUGS = new Set(["technology", "ai", "artificial-intelligence", "startups", "devtools", "cloud", "semiconductors"]);
+const TECH_SOURCE_HINTS = ["tech", "ai", "dev", "cloud", "data", "chip", "startup", "hacker", "product"];
 
 type Viewer = {
   id: string | null;
@@ -102,6 +105,7 @@ type MemoryStore = {
     ingestedAt: string;
     contentText: string;
     score: number;
+    payloadJson: Record<string, unknown> | null;
   }>;
   articleTopics: Array<{ articleId: string; topicId: string }>;
   runs: Array<{ id: string; feedDate: string; generatedAt: string; algorithmVersion: string; notes: string | null }>;
@@ -206,6 +210,25 @@ function addDays(dateKey: string, delta: number) {
   return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}-${String(next.getUTCDate()).padStart(2, "0")}`;
 }
 
+function feedReferenceDate(feedDate: string) {
+  const boundaryDateKey = addDays(feedDate, 1);
+  const [year, month, day] = boundaryDateKey.split("-").map(Number);
+  let guess = new Date(Date.UTC(year, month - 1, day, APP_DAILY_RESET_HOUR, 0, 0, 0));
+
+  for (let index = 0; index < 4; index += 1) {
+    const parts = normalizedParts(guess);
+    const targetLocalAsUtc = Date.UTC(year, month - 1, day, APP_DAILY_RESET_HOUR, 0, 0, 0);
+    const currentLocalAsUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, 0, 0, 0);
+    const diff = targetLocalAsUtc - currentLocalAsUtc;
+    if (diff === 0) {
+      break;
+    }
+    guess = new Date(guess.getTime() + diff);
+  }
+
+  return new Date(guess.getTime() - 1);
+}
+
 export function currentFeedDate(now = new Date()) {
   const parts = normalizedParts(now);
   const today = toDateKey(parts);
@@ -224,6 +247,48 @@ function compactSummary(value: string) {
 
 function normalizedIncomingScore(score: number | null | undefined) {
   return score ?? 5;
+}
+
+function collectorPayload(input: SyncArticleInput) {
+  const collector = input.payload_json?.collector;
+  if (!collector || typeof collector !== "object") {
+    return null;
+  }
+  const payload = collector as Record<string, unknown>;
+
+  const trustScore = payload.trust_score;
+  if (typeof trustScore !== "number") {
+    return null;
+  }
+
+  return {
+    trustScore,
+    engagement: payload.engagement && typeof payload.engagement === "object" ? (payload.engagement as Record<string, unknown>) : null,
+    symbols: Array.isArray(payload.symbols) ? payload.symbols : [],
+  };
+}
+
+function collectorTrustScore(payloadJson: Record<string, unknown> | null | undefined) {
+  const collector = payloadJson?.collector;
+  if (!collector || typeof collector !== "object") {
+    return null;
+  }
+  const trustScore = (collector as Record<string, unknown>).trust_score;
+  return typeof trustScore === "number" ? trustScore : null;
+}
+
+function incomingArticleScore(input: SyncArticleInput) {
+  const collector = collectorPayload(input);
+  if (collector) {
+    return collectorImportanceToArticleScore({
+      publishedAt: input.published_at,
+      trustScore: collector.trustScore,
+      engagement: collector.engagement,
+      symbols: collector.symbols,
+    });
+  }
+
+  return normalizedIncomingScore(input.score);
 }
 
 function normalizeTitle(title: string) {
@@ -329,6 +394,7 @@ async function ensureMemorySeeded() {
       ingestedAt: now,
       contentText: item.content_text,
       score: item.score ?? 0,
+      payloadJson: item.payload_json ?? null,
     });
     store.articleTopics.push(...topicIds.map((topicId) => ({ articleId, topicId })));
   }
@@ -447,6 +513,22 @@ type GenerateDailyFeedOptions = {
 type RankedStoryEntry<TStory> = {
   story: TStory;
   score: number;
+};
+
+type RankableStory = {
+  id: string;
+  canonicalSummary: string;
+  importanceScore: number;
+  lastUpdatedAt: string | Date;
+  updateCount: number;
+  sourceCount: number;
+  topicSlugs: string[];
+  representativeSourceSlug: string;
+  representativeSourceName: string;
+  representativeArticleScore: number;
+  representativeSummaryLength: number;
+  representativeContentLength: number;
+  representativeTrustScore: number | null;
 };
 
 type RunItemSeed = {
@@ -642,34 +724,74 @@ async function hydrateStoriesByIds(storyIds: string[], viewerId: string | null):
   );
 }
 
-function scoreStory(story: { importanceScore: number; lastUpdatedAt: string | Date; updateCount: number }) {
+function scoreStory(
+  story: { importanceScore: number; lastUpdatedAt: string | Date; updateCount: number },
+  referenceDate = new Date(),
+) {
   const freshnessHours = Math.max(
     0,
-    (Date.now() - +new Date(story.lastUpdatedAt)) / (60 * 60 * 1000),
+    (referenceDate.getTime() - +new Date(story.lastUpdatedAt)) / (60 * 60 * 1000),
   );
   const freshness = Math.max(0, 100 - (freshnessHours / 36) * 100);
   const momentum = Math.min(story.updateCount, 5) * 20;
-  return 0.6 * story.importanceScore + 0.25 * freshness + 0.15 * momentum;
+  const techBoost = "topicSlugs" in story && storyHasTechSignal(story as RankableStory) ? 14 : 0;
+  const corroborationBoost = "sourceCount" in story ? Math.min(story.sourceCount, 4) * 2.5 : 0;
+  return 0.6 * story.importanceScore + 0.25 * freshness + 0.15 * momentum + techBoost + corroborationBoost;
 }
 
-function buildRunItemSeeds<TStory extends { id: string; canonicalSummary: string; lastUpdatedAt: string | Date }>(
+function storyHasTechSignal(story: RankableStory) {
+  return (
+    story.topicSlugs.some((slug) => TECH_TOPIC_SLUGS.has(slug)) ||
+    TECH_SOURCE_HINTS.some(
+      (token) =>
+        story.representativeSourceSlug.toLowerCase().includes(token) ||
+        story.representativeSourceName.toLowerCase().includes(token),
+    )
+  );
+}
+
+function isStoryFeedEligible(story: RankableStory) {
+  if (story.representativeTrustScore !== null && story.representativeTrustScore < 0.6) {
+    return false;
+  }
+  if (story.representativeSummaryLength < 20) {
+    return false;
+  }
+  if (story.representativeContentLength < 20) {
+    return false;
+  }
+  if (story.representativeTrustScore !== null && story.representativeTrustScore >= 0.75) {
+    return true;
+  }
+  if (story.representativeTrustScore === null && story.sourceCount < 2 && story.updateCount < 2 && story.representativeSummaryLength < 30) {
+    return false;
+  }
+  if (story.representativeArticleScore < 5 && story.sourceCount < 2 && story.updateCount < 2) {
+    return false;
+  }
+  return true;
+}
+
+function buildRunItemSeeds<TStory extends RankableStory>(
   eligible: Array<RankedStoryEntry<TStory>>,
   feedDate: string,
+  referenceDate = feedReferenceDate(feedDate),
 ) {
-  const currentThreshold = +new Date(`${feedDate}T00:00:00.000Z`) - 24 * 60 * 60 * 1000;
+  const currentThreshold = referenceDate.getTime() - 24 * 60 * 60 * 1000;
   const important = eligible
-    .filter((entry) => +new Date(entry.story.lastUpdatedAt) >= currentThreshold && entry.score >= 70)
+    .filter((entry) => isStoryFeedEligible(entry.story) && +new Date(entry.story.lastUpdatedAt) >= currentThreshold && entry.score >= 70)
     .slice(0, IMPORTANT_LIMIT);
   const other = eligible
     .filter(
       (entry) =>
+        isStoryFeedEligible(entry.story) &&
         +new Date(entry.story.lastUpdatedAt) >= currentThreshold &&
         entry.score >= 45 &&
         !important.some((item) => item.story.id === entry.story.id),
     )
     .slice(0, OTHER_LIMIT);
   const catchup = eligible
-    .filter((entry) => +new Date(entry.story.lastUpdatedAt) < currentThreshold && entry.score >= 55)
+    .filter((entry) => isStoryFeedEligible(entry.story) && +new Date(entry.story.lastUpdatedAt) < currentThreshold && entry.score >= 55)
     .slice(0, CATCHUP_TOTAL_LIMIT);
 
   return [
@@ -695,6 +817,106 @@ function buildRunItemSeeds<TStory extends { id: string; canonicalSummary: string
       compactSummary: compactSummary(entry.story.canonicalSummary),
     })),
   ] satisfies RunItemSeed[];
+}
+
+async function loadDbRankableStories(): Promise<RankableStory[]> {
+  const db = getDb();
+  if (!db) {
+    return [];
+  }
+
+  const [storyRows, articleRows, sourceRows, topicRows, articleTopicRows] = await Promise.all([
+    db.select().from(stories),
+    db.select().from(articles).where(isNotNull(articles.storyId)),
+    db.select().from(sources),
+    db.select().from(topics),
+    db.select().from(articleTopics),
+  ]);
+
+  const sourceMap = new Map(sourceRows.map((row) => [row.id, row]));
+  const topicMap = new Map(topicRows.map((row) => [row.id, row.slug]));
+  const topicsByArticle = new Map<string, string[]>();
+  for (const join of articleTopicRows) {
+    const slug = topicMap.get(join.topicId);
+    if (!slug) {
+      continue;
+    }
+    const current = topicsByArticle.get(join.articleId) ?? [];
+    current.push(slug);
+    topicsByArticle.set(join.articleId, current);
+  }
+
+  const articlesByStory = new Map<string, typeof articleRows>();
+  for (const article of articleRows) {
+    if (!article.storyId) {
+      continue;
+    }
+    const current = articlesByStory.get(article.storyId) ?? [];
+    current.push(article);
+    articlesByStory.set(article.storyId, current);
+  }
+
+  return storyRows.flatMap((story) => {
+    const candidates = articlesByStory.get(story.id) ?? [];
+    const representative =
+      candidates.find((article) => article.id === story.representativeArticleId) ??
+      [...candidates].sort((left, right) => right.score - left.score || +new Date(right.publishedAt) - +new Date(left.publishedAt))[0];
+    if (!representative) {
+      return [];
+    }
+    const source = sourceMap.get(representative.sourceId);
+    return [{
+      id: story.id,
+      canonicalSummary: story.canonicalSummary,
+      importanceScore: story.importanceScore,
+      lastUpdatedAt: story.lastUpdatedAt,
+      updateCount: story.updateCount,
+      sourceCount: story.sourceCount,
+      topicSlugs: [...new Set(candidates.flatMap((article) => topicsByArticle.get(article.id) ?? []))],
+      representativeSourceSlug: source?.slug ?? "",
+      representativeSourceName: source?.name ?? "",
+      representativeArticleScore: representative.score,
+      representativeSummaryLength: representative.summary.trim().length,
+      representativeContentLength: representative.contentText.trim().length,
+      representativeTrustScore: collectorTrustScore((representative.payloadJson as Record<string, unknown> | null) ?? null),
+    }] satisfies RankableStory[];
+  });
+}
+
+function loadMemoryRankableStories(): RankableStory[] {
+  const store = memoryStore();
+  return store.stories.flatMap((story) => {
+    const candidates = store.articles.filter((article) => article.storyId === story.id);
+    const representative =
+      candidates.find((article) => article.id === story.representativeArticleId) ??
+      [...candidates].sort((left, right) => right.score - left.score || +new Date(right.publishedAt) - +new Date(left.publishedAt))[0];
+    if (!representative) {
+      return [];
+    }
+    const source = store.sources.find((entry) => entry.id === representative.sourceId);
+    return [{
+      id: story.id,
+      canonicalSummary: story.canonicalSummary,
+      importanceScore: story.importanceScore,
+      lastUpdatedAt: story.lastUpdatedAt,
+      updateCount: story.updateCount,
+      sourceCount: story.sourceCount,
+      topicSlugs: [
+        ...new Set(
+          store.articleTopics
+            .filter((entry) => candidates.some((article) => article.id === entry.articleId))
+            .map((entry) => store.topics.find((topic) => topic.id === entry.topicId)?.slug)
+            .filter(Boolean),
+        ),
+      ] as string[],
+      representativeSourceSlug: source?.slug ?? "",
+      representativeSourceName: source?.name ?? "",
+      representativeArticleScore: representative.score,
+      representativeSummaryLength: representative.summary.trim().length,
+      representativeContentLength: representative.contentText.trim().length,
+      representativeTrustScore: collectorTrustScore(representative.payloadJson),
+    }] satisfies RankableStory[];
+  });
 }
 
 async function ensureStoriesBackfilled() {
@@ -788,7 +1010,7 @@ async function recomputeDbStoryRollups() {
 
   const [storyRows, articleRows] = await Promise.all([
     db.select().from(stories),
-    db.select().from(articles).where(ne(articles.storyId, null as never)),
+    db.select().from(articles).where(isNotNull(articles.storyId)),
   ]);
 
   for (const story of storyRows) {
@@ -833,6 +1055,7 @@ async function recomputeDbStoryRollups() {
 async function ensureFeedRunForDate(feedDate: string, options: GenerateDailyFeedOptions = {}) {
   await ensureStoriesBackfilled();
   const forceRefresh = options.forceRefresh ?? false;
+  const referenceDate = feedReferenceDate(feedDate);
 
   return withStore(
     async () => {
@@ -842,18 +1065,11 @@ async function ensureFeedRunForDate(feedDate: string, options: GenerateDailyFeed
       }
 
       const existing = await db.select().from(dailyFeedRuns).where(eq(dailyFeedRuns.feedDate, feedDate));
-      const storyRows = await db.select().from(stories);
-      const eligible = storyRows
-        .map((story) => ({
-          story,
-          score: scoreStory({
-            importanceScore: story.importanceScore,
-            lastUpdatedAt: story.lastUpdatedAt,
-            updateCount: story.updateCount,
-          }),
-        }))
+      const eligible = (await loadDbRankableStories())
+        .filter((story) => +new Date(story.lastUpdatedAt) <= referenceDate.getTime())
+        .map((story) => ({ story, score: scoreStory(story, referenceDate) }))
         .sort((left, right) => right.score - left.score);
-      const rows = buildRunItemSeeds(eligible, feedDate);
+      const rows = buildRunItemSeeds(eligible, feedDate, referenceDate);
 
       let run = existing[0];
       if (run && !forceRefresh) {
@@ -925,10 +1141,11 @@ async function ensureFeedRunForDate(feedDate: string, options: GenerateDailyFeed
       if (existing && !forceRefresh) {
         return existing;
       }
-      const eligible = store.stories
-        .map((story) => ({ story, score: scoreStory(story) }))
+      const eligible = loadMemoryRankableStories()
+        .filter((story) => +new Date(story.lastUpdatedAt) <= referenceDate.getTime())
+        .map((story) => ({ story, score: scoreStory(story, referenceDate) }))
         .sort((left, right) => right.score - left.score);
-      const rows = buildRunItemSeeds(eligible, feedDate);
+      const rows = buildRunItemSeeds(eligible, feedDate, referenceDate);
       let run = existing;
       if (!run) {
         run = {
@@ -1945,6 +2162,7 @@ export async function syncArticles(items: SyncArticleInput[]) {
       let updated = 0;
       await db.transaction(async (tx) => {
         for (const item of items) {
+          const score = incomingArticleScore(item);
           await tx
             .insert(sources)
             .values({
@@ -2001,7 +2219,7 @@ export async function syncArticles(items: SyncArticleInput[]) {
                 imageUrl: item.image_url ?? null,
                 publishedAt: new Date(item.published_at),
                 contentText: item.content_text,
-                score: normalizedIncomingScore(item.score),
+                score,
                 payloadJson: item.payload_json ?? null,
                 updatedAt: new Date(),
               })
@@ -2022,7 +2240,7 @@ export async function syncArticles(items: SyncArticleInput[]) {
                 publishedAt: new Date(item.published_at),
                 ingestedAt: new Date(),
                 contentText: item.content_text,
-                score: normalizedIncomingScore(item.score),
+                score,
                 payloadJson: item.payload_json ?? null,
                 updatedAt: new Date(),
               })
@@ -2062,6 +2280,7 @@ export async function syncArticles(items: SyncArticleInput[]) {
       let inserted = 0;
       let updated = 0;
       for (const item of items) {
+        const score = incomingArticleScore(item);
         let source = store.sources.find((entry) => entry.slug === item.source.slug);
         if (!source) {
           source = {
@@ -2095,7 +2314,7 @@ export async function syncArticles(items: SyncArticleInput[]) {
         const existingArticle =
           store.articles.find((entry) => entry.sourceId === source.id && entry.externalId === item.external_id) ??
           store.articles.find((entry) => entry.url === item.url);
-        let articleId = existingArticle?.id ?? uuid();
+        const articleId = existingArticle?.id ?? uuid();
         if (existingArticle) {
           existingArticle.sourceId = source.id;
           existingArticle.externalId = item.external_id;
@@ -2106,7 +2325,8 @@ export async function syncArticles(items: SyncArticleInput[]) {
           existingArticle.imageUrl = item.image_url ?? null;
           existingArticle.publishedAt = item.published_at;
           existingArticle.contentText = item.content_text;
-          existingArticle.score = normalizedIncomingScore(item.score);
+          existingArticle.score = score;
+          existingArticle.payloadJson = item.payload_json ?? null;
           updated += 1;
         } else {
           store.articles.push({
@@ -2122,7 +2342,8 @@ export async function syncArticles(items: SyncArticleInput[]) {
             publishedAt: item.published_at,
             ingestedAt: now,
             contentText: item.content_text,
-            score: normalizedIncomingScore(item.score),
+            score,
+            payloadJson: item.payload_json ?? null,
           });
           inserted += 1;
         }

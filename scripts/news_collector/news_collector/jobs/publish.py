@@ -7,7 +7,8 @@ from news_collector.sync import publish_articles
 
 
 def main() -> None:
-    settings, _config, repository, _collectors = build_runtime()
+    settings, config, repository, _collectors = build_runtime()
+    trust_scores = config.get("trust_scores", {})
     state = repository.get_source_state("publisher")
     last_published_raw_id = int(state.get("last_published_raw_id", 0))
     total_received = 0
@@ -27,6 +28,7 @@ def main() -> None:
             repository,
             settings,
             rows,
+            trust_scores=trust_scores,
             batch_label=f"incremental-{rows[0]['id']}-{rows[-1]['id']}",
         )
         last_published_raw_id = result.last_raw_item_id

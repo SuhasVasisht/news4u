@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 
 from news_collector.models import StoryCluster
@@ -12,12 +13,13 @@ from news_collector.runtime import build_runtime
 
 def main() -> None:
     settings, config, repository, collectors = build_runtime()
+    force_run = os.environ.get("NEWS_COLLECTOR_FORCE_RUN") == "1"
     trust_scores = config["trust_scores"]
     inserted_rows: list[dict] = []
     errors: list[str] = []
     source_results: list[dict] = []
     for collector in collectors:
-        result = collector.run()
+        result = collector.run(force=force_run)
         raw_items = result.items
         inserted_count = 0
         deduped_count = 0

@@ -9,8 +9,9 @@ from typing import Any
 
 import httpx
 
-from news_collector.models import RawItem
+from news_collector.models import NewsItem, RawItem
 from news_collector.pipeline.extract import extract_image_from_page_html, extract_text_from_html
+from news_collector.pipeline.score import compute_item_score
 from news_collector.settings import Settings
 from news_collector.storage.repository import Repository
 from news_collector.utils import canonicalize_url, get_http_client, parse_datetime, slugify
@@ -135,6 +136,34 @@ def utc_isoformat(timestamp: datetime) -> str:
     return timestamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def collector_importance_score(item: RawItem, trust_score: float) -> float:
+    normalized = NewsItem(
+        source=item.source,
+        source_type=item.source_type,
+        category=item.category,
+        title=item.title.strip(),
+        url=item.url,
+        canonical_url=canonicalize_url(item.url),
+        published_at=item.published_at,
+        author=item.author,
+        image_url=item.image_url,
+        text=item.text,
+        summary=item.summary,
+        symbols=item.symbols,
+        entities=item.entities,
+        tags=item.tags,
+        engagement=item.engagement,
+        fingerprint="sync-payload",
+        raw=item.raw,
+    )
+    return compute_item_score(
+        normalized,
+        trust_score=trust_score,
+        confirmation_score=0.0,
+        market_impact_score=1.0 if normalized.symbols else 0.0,
+    )
+
+
 def enrich_item(
     item: RawItem,
     repository: Repository,
@@ -209,14 +238,17 @@ def enrich_item(
     return enriched, used_page_fetch
 
 
-def build_sync_article(item: RawItem, used_page_fetch: bool) -> dict[str, Any]:
+def build_sync_article(item: RawItem, used_page_fetch: bool, *, trust_score: float) -> dict[str, Any]:
     topic_rows = map_topics(item)
     external_id = item.external_id or synthetic_external_id(item)
     summary = (item.summary or item.title).strip() or item.title.strip()
+    importance_score = collector_importance_score(item, trust_score)
     payload_json = {
         "collector": {
             "source_type": item.source_type,
             "category": item.category,
+            "trust_score": trust_score,
+            "importance_score": importance_score,
             "tags": item.tags,
             "entities": item.entities,
             "symbols": item.symbols,
@@ -301,9 +333,10 @@ def refresh_feed_dates(
         return
     endpoint = settings.app_base_url.rstrip("/") + "/api/internal/feed/generate"
     headers = {"Authorization": f"Bearer {settings.app_sync_api_key}"}
-    for feed_date in feed_dates:
-        response = client.post(endpoint, headers=headers, json={"feed_date": feed_date, "force_refresh": True})
-        response.raise_for_status()
+    # Rebuilding historical feed dates from current story rollups leaks future
+    # state into older snapshots. Refresh the current app feed only.
+    response = client.post(endpoint, headers=headers, json={"force_refresh": True})
+    response.raise_for_status()
 
 
 def publish_articles(
@@ -311,6 +344,7 @@ def publish_articles(
     settings: Settings,
     rows: list[dict[str, Any]],
     *,
+    trust_scores: dict[str, float],
     batch_label: str,
 ) -> PublishResult:
     if not settings.app_base_url or not settings.app_sync_api_key:
@@ -327,7 +361,11 @@ def publish_articles(
         enriched_item, used_page_fetch = enrich_item(raw_item, repository, client)
         repository.update_raw_item_content(row["id"], enriched_item.text, enriched_item.image_url)
         repository.update_normalized_item_content(canonicalize_url(enriched_item.url), enriched_item.text, enriched_item.image_url)
-        payload = build_sync_article(enriched_item, used_page_fetch)
+        payload = build_sync_article(
+            enriched_item,
+            used_page_fetch,
+            trust_score=trust_scores.get(enriched_item.source, 0.5),
+        )
         sync_articles.append(payload)
         source_counts[payload["source"]["slug"]] = source_counts.get(payload["source"]["slug"], 0) + 1
         feed_dates.add(feed_date_for_timestamp(enriched_item.published_at))

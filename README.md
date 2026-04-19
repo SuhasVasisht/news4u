@@ -256,7 +256,22 @@ python -m news_collector.jobs.bootstrap_reddit_session
 ```bash
 npm run job:daily-sync
 npm run startup:catchup
+npm run audit:data-pipeline
 ```
+
+`npm run audit:data-pipeline` runs the collector pipeline in order and then prints the exact local artifacts to review:
+
+- collector SQLite rows from `raw_items`, `normalized_items`, and `story_clusters`
+- latest digest output under `scripts/news_collector/output/`
+- latest sync outbox bundle under `scripts/news_collector/output/sync/`
+- app-side article, story, and feed rows when `DATABASE_URL` is usable from the current shell
+- feed/story HTTP responses if the app is reachable at `http://127.0.0.1:3000`
+
+When reviewing score quality, compare:
+
+- `payload_json.collector.importance_score`: collector reference score on the `0.0-1.0` scale
+- `articles.score`: app-recomputed score on the `0-10` scale used by story/feed ranking
+- `stories.importance_score`: story rollup derived from the best article score
 
 ### HTTP-triggered run
 
@@ -571,6 +586,7 @@ docker compose exec -T web curl -fsS http://127.0.0.1:3000/api/health
 4. check `scripts/news_collector/output/sync/`
 5. check `GET /api/feed/today`
 6. check `logs/scheduler/daily-sync.log` after the scheduled window if using Docker cron
+7. or run `npm run audit:data-pipeline` to execute the same stages locally and print the review checkpoints in order
 
 ## Troubleshooting
 

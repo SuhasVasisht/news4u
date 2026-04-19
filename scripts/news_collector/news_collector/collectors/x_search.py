@@ -15,6 +15,9 @@ class XSearchCollector(BaseCollector):
     def collect(self) -> list[RawItem]:
         profile_dir = Path(self.context.settings.x_profile_dir)
         if not profile_dir.exists():
+            cached = self.cached_items(max_age_hours=168)
+            if cached:
+                return cached
             raise CollectorDegraded("missing persistent X browser profile")
         try:
             from playwright.sync_api import sync_playwright

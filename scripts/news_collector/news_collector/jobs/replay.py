@@ -7,7 +7,8 @@ from news_collector.sync import publish_articles
 
 
 def main() -> None:
-    settings, _config, repository, _collectors = build_runtime()
+    settings, config, repository, _collectors = build_runtime()
+    trust_scores = config.get("trust_scores", {})
     offset = 0
     total_received = 0
     total_inserted = 0
@@ -21,6 +22,7 @@ def main() -> None:
             repository,
             settings,
             rows,
+            trust_scores=trust_scores,
             batch_label=f"replay-{rows[0]['id']}-{rows[-1]['id']}",
         )
         total_received += result.received

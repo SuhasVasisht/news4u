@@ -6,7 +6,7 @@ import { ReadButton } from "@/components/article/read-button";
 import { SaveButton } from "@/components/article/save-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { formatDateTime } from "@/lib/utils";
+import { formatArticleBodyParagraphs, formatDateTime } from "@/lib/utils";
 import { getStory } from "@/lib/services/news-service";
 
 export const dynamic = "force-dynamic";
@@ -62,13 +62,21 @@ export default async function StoryPage({
         <div className="mt-6 space-y-5">
           {story.articles.map((article) => (
             <article key={article.id} className="surface-strong rounded-[24px] p-5">
+              {(() => {
+                const paragraphs = formatArticleBodyParagraphs(article.contentText);
+                return (
+                  <>
               <div className="flex flex-wrap items-center gap-2">
                 <Badge>{article.source.name}</Badge>
                 <span className="text-sm text-muted">{formatDateTime(article.publishedAt)}</span>
               </div>
               <h2 className="headline mt-3 text-2xl text-ink">{article.title}</h2>
               <p className="mt-3 max-w-3xl text-base leading-7 text-muted">{article.summary}</p>
-              <p className="mt-4 max-w-3xl text-base leading-8 text-muted">{article.contentText}</p>
+              <div className="mt-4 max-w-3xl space-y-4 text-base leading-8 text-muted">
+                {paragraphs.map((paragraph, index) => (
+                  <p key={`${article.id}-paragraph-${index}`}>{paragraph}</p>
+                ))}
+              </div>
               <div className="mt-4">
                 <a href={article.url} target="_blank" rel="noreferrer">
                   <Button variant="secondary" className="gap-2">
@@ -77,6 +85,9 @@ export default async function StoryPage({
                   </Button>
                 </a>
               </div>
+                  </>
+                );
+              })()}
             </article>
           ))}
         </div>

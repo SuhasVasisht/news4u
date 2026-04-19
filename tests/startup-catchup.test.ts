@@ -6,18 +6,9 @@ vi.mock("@/auth", () => ({
 
 import { getStartupCatchupState } from "@/lib/services/startup-catchup";
 
-declare global {
-  // eslint-disable-next-line no-var
-  var __memoryNewsStore__:
-    | undefined
-    | {
-        initialized: boolean;
-      };
-}
-
 describe("startup catch-up", () => {
   beforeEach(() => {
-    globalThis.__memoryNewsStore__ = undefined;
+    (globalThis as { __memoryNewsStore__?: unknown }).__memoryNewsStore__ = undefined;
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-17T18:00:00.000Z"));
   });

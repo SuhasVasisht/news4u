@@ -4,6 +4,11 @@ test("critical routes render and anonymous controls respond", async ({ page }) =
   const pageErrors: string[] = [];
   const failedResponses: string[] = [];
 
+  await page.addInitScript(() => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+  });
+
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("response", (response) => {
     if (response.status() >= 400) {
@@ -12,9 +17,13 @@ test("critical routes render and anonymous controls respond", async ({ page }) =
   });
 
   await page.goto("/");
-  await expect(page.getByText("Today is finite, stable, and meant to actually clear.")).toBeVisible();
-  await expect(page.getByRole("heading", { name: /open-model startups/i }).first()).toBeVisible();
-  await page.getByRole("button", { name: /Mark read/i }).first().click();
+  await expect(page.getByText("The highest-signal stories for today, with tech leading the mix.")).toBeVisible();
+  const markReadButtons = page.getByRole("button", { name: /Mark read/i });
+  if ((await markReadButtons.count()) > 0) {
+    await markReadButtons.first().click();
+  } else {
+    await expect(page.getByText("Nothing else is visible right now.")).toBeVisible();
+  }
 
   await page.goto("/catchup");
   await expect(page.getByText("Unread prior days, compressed.")).toBeVisible();

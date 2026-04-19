@@ -6,18 +6,9 @@ vi.mock("@/auth", () => ({
 
 import { generateDailyFeed, getTodayFeed, syncArticles } from "@/lib/services/news-service";
 
-declare global {
-  // eslint-disable-next-line no-var
-  var __memoryNewsStore__:
-    | undefined
-    | {
-        initialized: boolean;
-      };
-}
-
 describe("feed refresh", () => {
   beforeEach(() => {
-    globalThis.__memoryNewsStore__ = undefined;
+    (globalThis as { __memoryNewsStore__?: unknown }).__memoryNewsStore__ = undefined;
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-17T18:00:00.000Z"));
   });
@@ -40,7 +31,8 @@ describe("feed refresh", () => {
         url: "https://example.com/late-breaking-chip-story",
         image_url: "https://images.example.com/late-chip.jpg",
         published_at: "2026-04-17T18:30:00.000Z",
-        content_text: "Full body text for the late-arriving article.",
+        content_text:
+          "Full body text for the late-arriving article with enough detail to satisfy the current feed eligibility rules. It includes added context, follow-up reporting, and enough length to cross the minimum body threshold.",
         score: 10,
         payload_json: null,
         source: {
