@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { updatePreferencesAction } from "@/app/actions";
 import type { AppPreferences } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { ToggleSwitch } from "@/components/ui/toggle-switch";
@@ -8,18 +10,22 @@ import { ToggleSwitch } from "@/components/ui/toggle-switch";
 export function PreferencesForm({ initialValues }: { initialValues: AppPreferences }) {
   const [values, setValues] = useState(initialValues);
   const [saved, setSaved] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   async function persist(next: AppPreferences) {
+    const previous = values;
     setValues(next);
     setSaved(false);
-
-    await fetch("/api/preferences", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(next),
+    startTransition(async () => {
+      try {
+        await updatePreferencesAction(next);
+        setSaved(true);
+        router.refresh();
+      } catch {
+        setValues(previous);
+      }
     });
-
-    setSaved(true);
   }
 
   return (
@@ -38,6 +44,7 @@ export function PreferencesForm({ initialValues }: { initialValues: AppPreferenc
           <select
             className="surface-strong rounded-full px-4 py-2 text-sm"
             value={values.theme}
+            disabled={pending}
             onChange={(event) =>
               void persist({
                 ...values,
@@ -59,6 +66,7 @@ export function PreferencesForm({ initialValues }: { initialValues: AppPreferenc
           <select
             className="surface-strong rounded-full px-4 py-2 text-sm"
             value={values.feedDensity}
+            disabled={pending}
             onChange={(event) =>
               void persist({
                 ...values,
@@ -79,6 +87,7 @@ export function PreferencesForm({ initialValues }: { initialValues: AppPreferenc
           <ToggleSwitch
             checked={values.openOriginalInNewTab}
             label="Toggle open original source in new tab"
+            disabled={pending}
             onChange={(openOriginalInNewTab) =>
               void persist({
                 ...values,
@@ -90,7 +99,9 @@ export function PreferencesForm({ initialValues }: { initialValues: AppPreferenc
       </div>
 
       <div className="mt-6 flex items-center justify-between">
-        <p className="text-sm text-muted">{saved ? "Saved." : "Changes persist immediately."}</p>
+        <p className="text-sm text-muted">
+          {pending ? "Saving..." : saved ? "Saved." : "Changes persist immediately."}
+        </p>
         <Button variant="secondary" disabled>
           Account preferences
         </Button>

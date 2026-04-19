@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Archive } from "lucide-react";
+import { setStoryArchivedAction } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 
 export function ArchiveButton({
@@ -14,22 +16,20 @@ export function ArchiveButton({
   disabled?: boolean;
 }) {
   const [archived, setArchived] = useState(initialArchived);
-  const [pending, setPending] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   async function toggle() {
-    setPending(true);
     const next = !archived;
     setArchived(next);
-
-    try {
-      await fetch(`/api/stories/${storyId}/archive`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ archived: next }),
-      });
-    } finally {
-      setPending(false);
-    }
+    startTransition(async () => {
+      try {
+        await setStoryArchivedAction(storyId, next);
+        router.refresh();
+      } catch {
+        setArchived(!next);
+      }
+    });
   }
 
   return (

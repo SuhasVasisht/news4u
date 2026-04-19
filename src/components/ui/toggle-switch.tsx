@@ -6,17 +6,19 @@ type ToggleSwitchProps = {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label: string;
+  disabled?: boolean;
 };
 
-export function ToggleSwitch({ checked, onChange, label }: ToggleSwitchProps) {
+export function ToggleSwitch({ checked, onChange, label, disabled = false }: ToggleSwitchProps) {
   return (
     <button
       type="button"
       aria-pressed={checked}
       aria-label={label}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        "relative inline-flex h-7 w-12 items-center rounded-full border px-1",
+        "relative inline-flex h-7 w-12 items-center rounded-full border px-1 disabled:cursor-not-allowed disabled:opacity-60",
         checked ? "border-accent bg-accent" : "border-line-strong bg-panel-strong",
       )}
     >

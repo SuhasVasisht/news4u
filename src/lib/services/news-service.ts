@@ -222,6 +222,10 @@ function compactSummary(value: string) {
   return `${candidate.slice(0, 157).trimEnd().replace(/[^\w]+$/, "")}...`;
 }
 
+function normalizedIncomingScore(score: number | null | undefined) {
+  return score ?? 5;
+}
+
 function normalizeTitle(title: string) {
   return title
     .toLowerCase()
@@ -1967,18 +1971,29 @@ export async function syncArticles(items: SyncArticleInput[]) {
               },
             });
           const source = (await tx.select().from(sources).where(eq(sources.slug, item.source.slug)))[0];
-          const existing = (
+          const existingByExternalId = (
             await tx
               .select()
               .from(articles)
               .where(and(eq(articles.sourceId, source.id), eq(articles.externalId, item.external_id)))
           )[0];
+          const existingByUrl =
+            existingByExternalId ??
+            (
+              await tx
+                .select()
+                .from(articles)
+                .where(eq(articles.url, item.url))
+            )[0];
+          const existing = existingByExternalId ?? existingByUrl;
 
           let articleId = existing?.id ?? uuid();
           if (existing) {
             await tx
               .update(articles)
               .set({
+                sourceId: source.id,
+                externalId: item.external_id,
                 title: item.title,
                 summary: item.summary,
                 author: item.author ?? null,
@@ -1986,7 +2001,7 @@ export async function syncArticles(items: SyncArticleInput[]) {
                 imageUrl: item.image_url ?? null,
                 publishedAt: new Date(item.published_at),
                 contentText: item.content_text,
-                score: item.score ?? 0,
+                score: normalizedIncomingScore(item.score),
                 payloadJson: item.payload_json ?? null,
                 updatedAt: new Date(),
               })
@@ -2007,7 +2022,7 @@ export async function syncArticles(items: SyncArticleInput[]) {
                 publishedAt: new Date(item.published_at),
                 ingestedAt: new Date(),
                 contentText: item.content_text,
-                score: item.score ?? 0,
+                score: normalizedIncomingScore(item.score),
                 payloadJson: item.payload_json ?? null,
                 updatedAt: new Date(),
               })
@@ -2077,11 +2092,13 @@ export async function syncArticles(items: SyncArticleInput[]) {
         }
 
         const now = new Date().toISOString();
-        const existingArticle = store.articles.find(
-          (entry) => entry.sourceId === source.id && entry.externalId === item.external_id,
-        );
+        const existingArticle =
+          store.articles.find((entry) => entry.sourceId === source.id && entry.externalId === item.external_id) ??
+          store.articles.find((entry) => entry.url === item.url);
         let articleId = existingArticle?.id ?? uuid();
         if (existingArticle) {
+          existingArticle.sourceId = source.id;
+          existingArticle.externalId = item.external_id;
           existingArticle.title = item.title;
           existingArticle.summary = item.summary;
           existingArticle.author = item.author ?? null;
@@ -2089,7 +2106,7 @@ export async function syncArticles(items: SyncArticleInput[]) {
           existingArticle.imageUrl = item.image_url ?? null;
           existingArticle.publishedAt = item.published_at;
           existingArticle.contentText = item.content_text;
-          existingArticle.score = item.score ?? 0;
+          existingArticle.score = normalizedIncomingScore(item.score);
           updated += 1;
         } else {
           store.articles.push({
@@ -2105,7 +2122,7 @@ export async function syncArticles(items: SyncArticleInput[]) {
             publishedAt: item.published_at,
             ingestedAt: now,
             contentText: item.content_text,
-            score: item.score ?? 0,
+            score: normalizedIncomingScore(item.score),
           });
           inserted += 1;
         }

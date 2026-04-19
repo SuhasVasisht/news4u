@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { setSourceHiddenAction } from "@/app/actions";
 import type { ShellData } from "@/lib/types";
 import { ToggleSwitch } from "@/components/ui/toggle-switch";
 
@@ -10,16 +12,25 @@ export function SourceVisibilityList({
   items: ShellData["sources"];
 }) {
   const [sources, setSources] = useState(items);
+  const [pendingId, startTransition] = useTransition();
+  const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
+  const router = useRouter();
 
   async function update(sourceId: string, hidden: boolean) {
+    const previous = sources;
     setSources((current) =>
       current.map((item) => (item.id === sourceId ? { ...item, hidden } : item)),
     );
-
-    await fetch(`/api/sources/${sourceId}/hide`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ hidden }),
+    setActiveSourceId(sourceId);
+    startTransition(async () => {
+      try {
+        await setSourceHiddenAction(sourceId, hidden);
+        router.refresh();
+      } catch {
+        setSources(previous);
+      } finally {
+        setActiveSourceId(null);
+      }
     });
   }
 
@@ -42,6 +53,7 @@ export function SourceVisibilityList({
             <ToggleSwitch
               checked={!source.hidden}
               label={`Toggle ${source.name}`}
+              disabled={pendingId && activeSourceId === source.id}
               onChange={(checked) => void update(source.id, !checked)}
             />
           </div>

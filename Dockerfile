@@ -18,7 +18,17 @@ COPY . .
 RUN pip install --no-deps ./scripts/news_collector
 RUN npm run build
 
-FROM node:22-bookworm-slim AS runner
+FROM node:22-bookworm-slim AS web-runner
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends curl tzdata \
+  && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=builder /app /app
+EXPOSE 3000
+CMD ["npm", "run", "start"]
+
+FROM node:22-bookworm-slim AS worker-runner
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 curl tzdata cron \
   && rm -rf /var/lib/apt/lists/*
@@ -28,5 +38,4 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 ENV NODE_ENV=production
 COPY --from=base /opt/venv /opt/venv
 COPY --from=builder /app /app
-EXPOSE 3000
-CMD ["npm", "run", "start"]
+CMD ["sh", "/app/scripts/scheduler-entrypoint.sh"]

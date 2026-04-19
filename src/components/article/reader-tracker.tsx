@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { markStoryReadOnViewAction } from "@/app/actions";
 
 export function ReaderTracker({ storyId, initialRead }: { storyId: string; initialRead: boolean }) {
   useEffect(() => {
@@ -8,11 +9,7 @@ export function ReaderTracker({ storyId, initialRead }: { storyId: string; initi
       return;
     }
 
-    void fetch(`/api/stories/${storyId}/read`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ read: true }),
-    });
+    void markStoryReadOnViewAction(storyId);
   }, [storyId, initialRead]);
 
   return null;

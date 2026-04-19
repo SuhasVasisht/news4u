@@ -1,11 +1,38 @@
 {
   auto_https off
+  admin off
 }
 
 :80 {
-  basic_auth {
-    {$BASIC_AUTH_USER} {$BASIC_AUTH_PASSWORD_HASH}
+  header {
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "no-referrer"
+    Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+    X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+    -Server
   }
 
-  reverse_proxy web:3000
+  @robots path /robots.txt
+  header @robots Content-Type "text/plain; charset=utf-8"
+  respond @robots "User-agent: *\nDisallow: /\n" 200
+
+  @llms path /llms.txt
+  header @llms Content-Type "text/plain; charset=utf-8"
+  respond @llms "User-agent: *\nDisallow: /\n" 200
+
+  route {
+    @internal path /api/internal/*
+    respond @internal 404
+
+    @auth path /api/auth/*
+    handle @auth {
+      reverse_proxy web:3000
+    }
+
+    @api path /api/*
+    respond @api 404
+
+    reverse_proxy web:3000
+  }
 }

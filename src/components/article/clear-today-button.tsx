@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { clearTodayAction } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 
 export function ClearTodayButton({
@@ -12,18 +13,17 @@ export function ClearTodayButton({
   initialCleared: boolean;
 }) {
   const [cleared, setCleared] = useState(initialCleared);
-  const [pending, setPending] = useState(false);
+  const [pending, startTransition] = useTransition();
   const router = useRouter();
 
   async function clear() {
-    setPending(true);
-    try {
-      await fetch("/api/feed/clear-today", { method: "POST" });
-      setCleared(true);
+    startTransition(async () => {
+      const result = await clearTodayAction();
+      if (result.cleared) {
+        setCleared(true);
+      }
       router.refresh();
-    } finally {
-      setPending(false);
-    }
+    });
   }
 
   return (

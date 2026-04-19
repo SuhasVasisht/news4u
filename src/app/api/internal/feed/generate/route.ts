@@ -4,8 +4,8 @@ import { parseJsonBody } from "@/lib/utils/request";
 
 function isAuthorized(request: Request) {
   const authHeader = request.headers.get("authorization");
-  const candidates = [process.env.INTERNAL_API_KEY, process.env.SYNC_API_KEY].filter(Boolean);
-  return candidates.some((value) => authHeader === `Bearer ${value}`);
+  const expected = process.env.SYNC_API_KEY;
+  return Boolean(expected && authHeader === `Bearer ${expected}`);
 }
 
 export async function POST(request: Request) {

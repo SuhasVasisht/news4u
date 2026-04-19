@@ -95,7 +95,7 @@ This is durable across container restarts, but not a substitute for real backups
 
 ## Environment Variables
 
-Copy `.env.example` to `.env` for local or Docker development. Use `.env.production.example` as the base for a production deployment.
+Copy `.env.example` to `.env` for local or Docker development. This repo does not currently include a separate `.env.production.example`, so production should also start from `.env.example` and then replace every placeholder with real values.
 
 ### Core app env
 
@@ -152,10 +152,27 @@ In Docker you should leave `PYTHON_BIN` empty so the container uses its installe
 Start from:
 
 ```bash
-cp .env.production.example .env
+cp .env.example .env
 ```
 
 Then replace all placeholder credentials before starting the stack.
+
+For the current Docker production path, set these explicitly:
+
+```bash
+NEWS_APP_BASE_URL=http://web:3000
+NEWS_APP_SYNC_API_KEY=${SYNC_API_KEY}
+PYTHON_BIN=
+AUTH_TRUST_HOST=true
+AUTH_URL=https://your-domain.example
+NEXTAUTH_URL=https://your-domain.example
+```
+
+Notes:
+
+- `NEWS_APP_BASE_URL` must point at the internal Docker service, not `127.0.0.1`
+- leave `PYTHON_BIN` empty in Docker so the container uses its installed Python runtime
+- `AUTH_URL` and `NEXTAUTH_URL` must match the public HTTPS origin used by the browser, or OAuth callbacks will redirect to the wrong host
 
 ## Local Development
 
@@ -273,7 +290,7 @@ The `web` container now runs migrations automatically on startup by default.
 - `web`: Next.js app and embedded collector runtime
 - `scheduler`: cron process that calls the daily-sync route
 - `db`: Postgres 16
-- `proxy`: Caddy reverse proxy with basic auth
+- `proxy`: Caddy reverse proxy on host port `80`
 
 ### Persistent data
 
@@ -297,10 +314,136 @@ Postgres data is stored in the Docker named volume `postgres_data`.
 
 ### Notes
 
-- `NEWS_APP_BASE_URL` should remain `http://127.0.0.1:3000` inside the app container for self-calls during publish.
+- `NEWS_APP_BASE_URL` should be `http://web:3000` so the scheduler container can publish into the app over the internal Docker network.
 - `scheduler` posts to `http://web:3000/api/internal/jobs/daily-sync`.
-- `proxy` fronts the app with Caddy and basic auth.
+- `proxy` fronts the app with Caddy on host port `80`.
 - `syncArticles()` is transactional so a partial batch does not commit halfway through.
+
+## Production Setup
+
+This is the production path used for `news.suhasv.com`: Docker Compose on the host, Caddy bound to local port `80`, and a Cloudflare tunnel forwarding the public hostname to that local proxy.
+
+### 1. Host requirements
+
+- Docker Engine with `docker compose`
+- a working Cloudflare Tunnel on the host
+- outbound network access for the app and scheduler containers
+- enough disk for the Postgres volume plus `scripts/news_collector/data/` and `scripts/news_collector/output/`
+
+### 2. Required env values
+
+Set these before first start:
+
+```bash
+POSTGRES_PASSWORD=replace-me
+DATABASE_URL=postgres://postgres:<url-encoded-password>@db:5432/signal_desk
+SYNC_API_KEY=replace-me
+INTERNAL_API_KEY=replace-me
+AUTH_SECRET=replace-me
+AUTH_TRUST_HOST=true
+AUTH_URL=https://your-domain.example
+NEXTAUTH_URL=https://your-domain.example
+NEWS_APP_BASE_URL=http://web:3000
+NEWS_APP_SYNC_API_KEY=${SYNC_API_KEY}
+PYTHON_BIN=
+```
+
+Optional but usually needed:
+
+```bash
+NEWSAPI_KEY=...
+GUARDIAN_API_KEY=...
+ALPHAVANTAGE_API_KEY=...
+PRODUCTHUNT_TOKEN=...
+AUTH_GOOGLE_ID=...
+AUTH_GOOGLE_SECRET=...
+```
+
+### 3. Google OAuth setup
+
+If you enable Google sign-in, the Google OAuth client must include the public callback URL:
+
+```text
+https://your-domain.example/api/auth/callback/google
+```
+
+Do not use `http://localhost:3000/...` in the production Google client.
+
+### 4. Cloudflare tunnel setup
+
+Point the public hostname at the local Caddy proxy on port `80`, not the Next.js process directly.
+
+Example `~/.cloudflared/config.yml`:
+
+```yaml
+tunnel: <tunnel-uuid>
+credentials-file: /home/<user>/.cloudflared/<tunnel-uuid>.json
+
+ingress:
+  - hostname: your-domain.example
+    service: http://localhost:80
+  - service: http_status:404
+```
+
+Then run the tunnel as a persistent service on the host.
+
+### 5. Start production
+
+```bash
+docker compose up -d --build
+```
+
+That starts:
+
+- `db`: Postgres 16 with persisted Docker volume storage
+- `web`: Next.js app with startup migrations
+- `scheduler`: cron-driven daily sync runner
+- `proxy`: Caddy reverse proxy on `127.0.0.1:80`
+
+### 6. Verify production health
+
+Check container state:
+
+```bash
+docker compose ps
+```
+
+Check app health from inside the stack:
+
+```bash
+docker compose exec -T web curl -fsS http://127.0.0.1:3000/api/health
+```
+
+The expected production result includes:
+
+```json
+{"status":"ok","databaseConfigured":true}
+```
+
+Check the feed:
+
+```bash
+docker compose exec -T web curl -fsS http://127.0.0.1:3000/api/feed/today
+```
+
+Check the public site:
+
+```bash
+curl -I https://your-domain.example/
+```
+
+### 7. Logs and day-2 operations
+
+Useful commands:
+
+```bash
+docker compose logs --tail=100 web
+docker compose logs --tail=100 scheduler
+docker compose logs --tail=100 proxy
+docker compose exec -T scheduler sh -lc 'cd /app/scripts/news_collector && /opt/venv/bin/python -m news_collector.jobs.replay'
+```
+
+Use the replay command when collector data already exists on disk and you need to republish it into Postgres.
 
 ## Optional Browser-Backed Sources
 
@@ -405,7 +548,7 @@ npm run test:all
 docker compose ps
 docker compose logs --tail=100 web
 docker compose logs --tail=100 scheduler
-curl -u "${BASIC_AUTH_USER}:<password>" http://127.0.0.1/api/health
+docker compose exec -T web curl -fsS http://127.0.0.1:3000/api/health
 ```
 
 ## Common Workflows

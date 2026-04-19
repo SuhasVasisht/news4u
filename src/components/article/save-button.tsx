@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Bookmark } from "lucide-react";
+import { setStorySavedAction } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 
 export function SaveButton({
@@ -14,22 +16,20 @@ export function SaveButton({
   disabled?: boolean;
 }) {
   const [saved, setSaved] = useState(initialSaved);
-  const [pending, setPending] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   async function toggle() {
-    setPending(true);
     const next = !saved;
     setSaved(next);
-
-    try {
-      await fetch(`/api/stories/${storyId}/save`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ saved: next }),
-      });
-    } finally {
-      setPending(false);
-    }
+    startTransition(async () => {
+      try {
+        await setStorySavedAction(storyId, next);
+        router.refresh();
+      } catch {
+        setSaved(!next);
+      }
+    });
   }
 
   return (

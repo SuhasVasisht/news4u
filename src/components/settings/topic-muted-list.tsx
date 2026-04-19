@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { setTopicMutedAction } from "@/app/actions";
 import type { ShellData } from "@/lib/types";
 import { ToggleSwitch } from "@/components/ui/toggle-switch";
 
@@ -10,16 +12,25 @@ export function TopicMutedList({
   items: ShellData["topics"];
 }) {
   const [topics, setTopics] = useState(items);
+  const [pendingId, startTransition] = useTransition();
+  const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
+  const router = useRouter();
 
   async function update(topicId: string, muted: boolean) {
+    const previous = topics;
     setTopics((current) =>
       current.map((item) => (item.id === topicId ? { ...item, muted } : item)),
     );
-
-    await fetch(`/api/topics/${topicId}/mute`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ muted }),
+    setActiveTopicId(topicId);
+    startTransition(async () => {
+      try {
+        await setTopicMutedAction(topicId, muted);
+        router.refresh();
+      } catch {
+        setTopics(previous);
+      } finally {
+        setActiveTopicId(null);
+      }
     });
   }
 
@@ -42,6 +53,7 @@ export function TopicMutedList({
             <ToggleSwitch
               checked={!topic.muted}
               label={`Toggle ${topic.name}`}
+              disabled={pendingId && activeTopicId === topic.id}
               onChange={(checked) => void update(topic.id, !checked)}
             />
           </div>

@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { CheckCheck } from "lucide-react";
+import { setStoryReadAction } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 
 export function ReadButton({
@@ -14,22 +16,20 @@ export function ReadButton({
   disabled?: boolean;
 }) {
   const [read, setRead] = useState(initialRead);
-  const [pending, setPending] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   async function toggle() {
-    setPending(true);
     const next = !read;
     setRead(next);
-
-    try {
-      await fetch(`/api/stories/${storyId}/read`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ read: next }),
-      });
-    } finally {
-      setPending(false);
-    }
+    startTransition(async () => {
+      try {
+        await setStoryReadAction(storyId, next);
+        router.refresh();
+      } catch {
+        setRead(!next);
+      }
+    });
   }
 
   return (
