@@ -39,14 +39,14 @@ class APCollector(BaseCollector):
             )
         )
         items: list[RawItem] = []
-        stale_count = 0
+        requests = 0
         max_requests = int(self.context.config.get("max_requests_per_run", 8))
         for article_url in urls:
             if article_url in seen_urls:
-                stale_count += 1
-                if not self._force_run and stale_count >= 2:
-                    break
                 continue
+            if requests >= max_requests:
+                break
+            requests += 1
             article_response = self.client.get(article_url)
             if article_response.status_code >= 400:
                 continue

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DailySyncJobError, runDailySyncJob } from "@/lib/services/daily-sync";
+import { runDailySyncJob } from "@/lib/services/daily-sync";
 
 describe("daily sync job", () => {
   beforeEach(() => {
@@ -91,6 +91,6 @@ describe("daily sync job", () => {
           publish: { status: "failed" },
         },
       },
-    } satisfies Partial<DailySyncJobError>);
+    });
   });
 });

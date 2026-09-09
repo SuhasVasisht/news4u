@@ -12,7 +12,18 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "scripts/news_collector/.venv/**",
+    "scripts/news_collector/output/**",
   ]),
+  {
+    files: ["src/components/edition/news-edition.tsx"],
+    rules: {
+      // This component is shared with a plain HTML build, not just Next navigation.
+      "@next/next/no-html-link-for-pages": "off",
+      // Browser storage and URL state are hydrated after server rendering.
+      "react-hooks/set-state-in-effect": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

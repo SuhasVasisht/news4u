@@ -68,6 +68,9 @@ class Repository:
                 },
             )
         except sqlite3.IntegrityError:
+            with self.db.connect() as conn:
+                conn.execute("UPDATE normalized_items SET text = ?, summary = ?, raw_json = ? WHERE fingerprint = ?",
+                             (item.text, item.summary, json.dumps(item.raw), item.fingerprint))
             return None
 
     def update_item_cluster(self, item_id: int, cluster_id: str, score: float) -> None:
@@ -115,8 +118,9 @@ class Repository:
             rows = conn.execute(
                 """
                 SELECT * FROM normalized_items
-                WHERE published_at IS NULL OR published_at >= datetime('now', ?)
-                ORDER BY COALESCE(published_at, '') DESC, id DESC
+                WHERE julianday(published_at) >= julianday('now', ?)
+                  AND julianday(published_at) <= julianday('now', '+5 minutes')
+                ORDER BY julianday(published_at) DESC, id DESC
                 """,
                 (f"-{limit_hours} hours",),
             ).fetchall()
@@ -141,6 +145,33 @@ class Repository:
         if row is None:
             return False
         return row["image_url"]
+
+    def get_image_quality(self, canonical_url: str) -> dict | None:
+        with self.db.connect() as conn:
+            row = conn.execute("SELECT result_json FROM image_quality_cache WHERE canonical_url = ?", (canonical_url,)).fetchone()
+        return json.loads(row["result_json"]) if row else None
+
+    def source_discoveries(self) -> list[dict]:
+        from news_collector.utils import canonicalize_url
+        with self.db.connect() as conn:
+            rows = conn.execute("SELECT source, url, title, published_at, raw_json FROM raw_items ORDER BY id DESC").fetchall()
+        unique = {}
+        for row in rows:
+            canonical = canonicalize_url(row["url"])
+            unique.setdefault((row["source"], canonical), {**dict(row), "canonical_url": canonical})
+        return list(unique.values())
+
+    def set_image_quality(self, canonical_url: str, result: dict) -> None:
+        with self.db.connect() as conn:
+            conn.execute("INSERT INTO image_quality_cache VALUES (?, ?) ON CONFLICT(canonical_url) DO UPDATE SET result_json=excluded.result_json", (canonical_url, json.dumps(result)))
+
+    def replace_article_image(self, url: str, image_url: str | None) -> None:
+        from news_collector.utils import canonicalize_url
+        canonical = canonicalize_url(url)
+        with self.db.connect() as conn:
+            conn.execute("UPDATE raw_items SET image_url = ? WHERE url = ? OR url = ?", (image_url, url, canonical))
+            conn.execute("UPDATE normalized_items SET image_url = ? WHERE canonical_url = ?", (image_url, canonical))
+            conn.execute("UPDATE story_clusters SET image_url = ? WHERE canonical_url = ?", (image_url, canonical))
 
     def set_cached_image(self, canonical_url: str, image_url: str | None, checked_at: str) -> None:
         with self.db.connect() as conn:

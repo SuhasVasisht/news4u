@@ -11,6 +11,9 @@ class AlphaVantageNewsCollector(BaseCollector):
     def collect(self) -> list[RawItem]:
         api_key = self.context.settings.alphavantage_api_key or "demo"
         items: list[RawItem] = []
+        state = self.get_state()
+        state.pop("collection_warning", None)
+        self.set_state(state)
         for topic in self.context.config.get("topics", []):
             response = self.client.get(
                 "https://www.alphavantage.co/query",
@@ -23,11 +26,17 @@ class AlphaVantageNewsCollector(BaseCollector):
             )
             response.raise_for_status()
             payload = response.json()
-            if payload.get("Information"):
+            warning = payload.get("Information") or payload.get("Note") or payload.get("Error Message")
+            if warning:
+                if items:
+                    state = self.get_state()
+                    state["collection_warning"] = f"Partial topic collection: {warning}"
+                    self.set_state(state)
+                    return items
                 cached = self.cached_items()
                 if cached:
                     return cached
-                raise CollectorDegraded(payload["Information"])
+                raise CollectorDegraded(warning)
             for article in payload.get("feed", []):
                 title = article.get("title", "")
                 summary = article.get("summary")

@@ -1,5 +1,11 @@
 # News App
 
+## Shared Spreads Reader And Static Daily Edition
+
+The reader now uses the neutral Shared Spreads design. Run `npm run build:daily` to collect current sources and create `out/index.html`, or `npm run build:static` to rebuild an already-current snapshot. The same React reader powers the Next.js app and the standalone HTML.
+
+See [static build, scheduling, and migration notes](docs/static-edition.md) and the [September 8 source and deduplication audit](docs/source-audit-2026-09-08.md). The older backend documentation below describes the retained Postgres/auth pipeline, not the new static-first reader's state model.
+
 `news-app` is a combined repository for:
 
 - a self-hosted Next.js news reader
@@ -204,14 +210,16 @@ For a lightweight app-only local run:
 cp .env.example .env
 ```
 
-Then set at least:
+Then generate unique local credentials:
 
 ```bash
-SYNC_API_KEY=local-sync-key
-INTERNAL_API_KEY=local-internal-key
-AUTH_SECRET=local-auth-secret
+SYNC_API_KEY=$(openssl rand -hex 32)
+INTERNAL_API_KEY=$(openssl rand -hex 32)
+AUTH_SECRET=$(openssl rand -hex 32)
 PYTHON_BIN=scripts/news_collector/.venv/bin/python
 ```
+
+Store the generated values in your ignored `.env` file; do not commit them.
 
 ### 4. Start the app
 
@@ -334,9 +342,24 @@ Postgres data is stored in the Docker named volume `postgres_data`.
 - `proxy` fronts the app with Caddy on host port `80`.
 - `syncArticles()` is transactional so a partial batch does not commit halfway through.
 
-## Production Setup
+## Static Publishing To Cloudflare
 
-This is the production path used for `news.suhasv.com`: Docker Compose on the host, Caddy bound to local port `80`, and a Cloudflare tunnel forwarding the public hostname to that local proxy.
+The newspaper is built locally and deployed as static HTML to Cloudflare Pages.
+The latest paper lives at `/`, and **Past editions** opens the dated archive at
+`/editions/`. Generated editions and approved WebP media stay outside Git. Each
+deployment backs up its public bundle to `~/news4u-backups/`; set `NEWS_BACKUP_DIR`
+to use another location outside the workspace. Image redistribution permissions
+are configured explicitly in `config/image-permissions.json`.
+Use `npm run publish:daily` to collect, review, build, deploy, and test the public
+site, or `npm run publish:static` to publish the already reviewed daily snapshot.
+Deployment setup, DNS migration, credentials, verification and rollback are documented
+in [docs/cloudflare-deployment.md](docs/cloudflare-deployment.md).
+
+## Legacy Server Setup
+
+This is the previous server deployment: Docker Compose on the host, Caddy bound to
+local port `80`, and a Cloudflare tunnel forwarding the public hostname. It is not
+required for the static Pages deployment. Keep unrelated tunnel routes intact.
 
 ### 1. Host requirements
 

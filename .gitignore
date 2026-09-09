@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -13,6 +14,8 @@
 # testing
 /coverage
 /test-results
+/playwright-report/
+/blob-report/
 
 # next.js
 /.next/
@@ -24,6 +27,22 @@
 # misc
 .DS_Store
 *.pem
+*.key
+*.p12
+*.pfx
+.wrangler/
+.venv/
+__pycache__/
+*.py[cod]
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Self-contained design exports (embedded assets and sample stories)
+/designs/*.html
 
 # debug
 npm-debug.log*

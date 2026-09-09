@@ -1,0 +1,367 @@
+"""Evidence-bound editorial admission and notes, before snapshot export."""
+from __future__ import annotations
+
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import tempfile
+from typing import Literal
+from urllib.parse import urlparse, parse_qs
+
+import httpx
+from pydantic import BaseModel, ConfigDict, Field
+from selectolax.parser import HTMLParser
+
+from news_collector.pipeline.extract import extract_text_from_html
+from news_collector.pipeline.images import download
+from news_collector.utils import parse_datetime
+from news_collector.pipeline.publication_history import load_history, history_hash, prior_match
+from zoneinfo import ZoneInfo
+
+POLICY_VERSION = "editorial-v1"
+LONGFORM = {"lenny", "dwarkesh", "interconnects", "latent_space", "simon_willison", "bytebytego"}
+BLOCKED_HOSTS = {"producthunt.com", "marketbeat.com", "marketscreener.com", "accessnewswire.com",
+                 "globenewswire.com", "prnewswire.com", "kalkine.com.au", "intellectia.ai",
+                 "tickerreport.com", "themarketsdaily.com"}
+PROMO = re.compile(r"\b(sponsored|partner content|coupon|promo code|deals of the|best deals|buy rating|price target|stock unloaded|takes .* position|average rating|stock rating|here.s how much|invested.*years ago)\b", re.I)
+
+
+class NoteSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    heading: str
+    body: str
+    evidence: list[str]
+
+
+class Decision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    decision: Literal["admit", "hold", "reject"]
+    quality: int = Field(ge=0, le=100)
+    importance: int = Field(ge=0, le=100)
+    kind: Literal["reporting", "analysis", "podcast", "announcement"]
+    reason: str
+    headline: str
+    summary: str
+    points: list[str]
+    sections: list[NoteSection]
+    caveats: list[str]
+    evidence: list[str]
+    duplicate_of: str | None
+    sector: Literal["Technology", "AI", "Markets", "Economy", "Deals & regulation", "World", "Policy", "Science & health", "Reading room", "Listening room"] | None = None
+
+
+class ReviewBatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    decisions: list[Decision]
+
+
+class SelectionRejection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    reason: str
+
+
+class EditionSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    selected_ids: list[str]
+    excluded: list[SelectionRejection]
+
+
+class ExternalReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    requestHash: str
+    reviewer: str = Field(min_length=1)
+    reviewedAt: datetime
+    decisions: list[Decision]
+    selection: EditionSelection
+
+
+def validate_external_review(payload, request_hash, pending_packets, now):
+    reviewed = ExternalReview.model_validate(payload)
+    if reviewed.requestHash != request_hash:
+        raise ValueError("Review file does not match current source packets and policy")
+    if reviewed.reviewedAt.tzinfo is None or not timedelta(minutes=-5) <= now - reviewed.reviewedAt <= timedelta(hours=24):
+        raise ValueError("Review file must have a current timezone-aware review timestamp")
+    validate_decisions(ReviewBatch(decisions=reviewed.decisions), pending_packets)
+    return reviewed
+
+
+def clean_text(value):
+    parser = HTMLParser(value or "")
+    for node in parser.css("script,style,nav,footer,form"):
+        node.decompose()
+    return re.sub(r"[ \t]+", " ", parser.text(separator="\n")).strip()
+
+
+def audio_url(raw):
+    links = [*raw.get("enclosures", []), *raw.get("links", [])]
+    return next((e.get("href") or e.get("url") for e in links
+                 if e.get("type", "").startswith("audio/")), None)
+
+
+def exclusion(row, now):
+    host = (urlparse(row["canonical_url"]).hostname or "").removeprefix("www.")
+    if host in BLOCKED_HOSTS or row["source"] in {"producthunt", "x_search", "reddit", "alphavantage_movers"}:
+        return "discovery_or_promotional_source"
+    if PROMO.search(row["title"]):
+        return "routine_alert_or_promotion"
+    date = parse_datetime(row.get("published_at"))
+    window = timedelta(days=30) if row["source"] in LONGFORM else timedelta(days=7) if row["source"] in {"sec_press", "federal_reserve", "doj_antitrust"} else timedelta(hours=48)
+    if not date or date > now + timedelta(minutes=5) or date < now - window:
+        return "outside_editorial_window"
+    return None
+
+
+def content_packet(row, repository, user_agent):
+    raw = json.loads(row.get("raw_json") or "{}")
+    text = clean_text(row.get("text") or row.get("summary"))
+    audio = audio_url(raw)
+    kind = "podcast" if audio and row["source"] in LONGFORM else raw.get("_editorial_type", "reporting")
+    if kind == "podcast" and not audio:
+        kind = "analysis"
+    basis = "Publisher transcript" if audio and len(text.split()) > 2500 else "Publisher article" if len(text.split()) >= 400 else "Feed excerpt"
+    if (len(text.split()) < 400 or row["source"] == "doj_antitrust") and kind != "podcast":
+        cached = repository.get_cached_content(row["canonical_url"])
+        checked = parse_datetime(cached.get("checked_at")) if cached else None
+        fresh_cache = checked and timedelta(0) <= datetime.now(timezone.utc) - checked < timedelta(hours=6)
+        cache_status = "editorial-full-doj-v2" if row["source"] == "doj_antitrust" else "editorial-full"
+        if cached and cached.get("status") == cache_status and fresh_cache:
+            text = cached["content_text"]
+        else:
+            try:
+                with httpx.Client(timeout=15, follow_redirects=False, headers={"User-Agent": user_agent}) as client:
+                    body, final_url = download(client, row["url"], 3_000_000)
+                extracted = extract_text_from_html(body.decode("utf-8", errors="replace"), final_url) or ""
+                if len(extracted.split()) > len(text.split()):
+                    text = extracted
+                    repository.set_cached_content(row["canonical_url"], text, datetime.now(timezone.utc).isoformat(), status=cache_status)
+            except Exception:
+                pass
+        basis = "Publisher article" if len(text.split()) >= 400 else "Feed excerpt"
+    duration = None
+    if row["source"] == "theo_video":
+        from youtube_transcript_api import YouTubeTranscriptApi
+        video_id = parse_qs(urlparse(row["url"]).query).get("v", [None])[0]
+        if not video_id:
+            raise ValueError("No public long-form video transcript")
+        transcript = YouTubeTranscriptApi().fetch(video_id, languages=["en"])
+        text = "\n".join(f"[{int(part.start) // 60:02d}:{int(part.start) % 60:02d}] {part.text}" for part in transcript)
+        basis = "Public video captions"
+    if audio and len(text.split()) < 2500:
+        from news_collector.pipeline.podcasts import transcribe_episode
+        transcript = transcribe_episode(audio, repository, user_agent)
+        text, duration = transcript["text"], transcript["duration"]
+        basis = "Machine transcript (full audio)"
+    # Do not truncate long interviews: review every supplied transcript chunk.
+    max_words = 45000 if kind == "podcast" or row["source"] == "theo_video" else 5000
+    words = text.split()
+    truncated = len(words) > max_words
+    words = words[:max_words]
+    chunks = [{"id": f"p{i // 350 + 1}", "text": " ".join(words[i:i + 350])} for i in range(0, len(words), 350)]
+    return {"id": hashlib.sha256(row["canonical_url"].encode()).hexdigest()[:20],
+            "inputHash": source_hash(row),
+            "url": row["canonical_url"], "source": row["source"], "title": row["title"],
+            "publishedAt": row["published_at"], "kind": kind, "basis": basis,
+            "audio": audio, "duration": duration, "truncated": truncated, "chunks": chunks,
+            "wordCount": len(words), "category": row["category"], "sector": raw.get("_edition_sector")}
+
+
+def source_hash(row):
+    return hashlib.sha256(json.dumps({k: row.get(k) for k in
+        ["canonical_url", "title", "published_at", "text", "summary"]}, sort_keys=True).encode()).hexdigest()
+
+
+def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch):
+    executable = shutil.which(os.environ.get("NEWS_EDITOR_CODEX_BIN", "codex"))
+    if not executable:
+        raise RuntimeError("Codex CLI required for editorial review. Previous paper retained.")
+    with tempfile.TemporaryDirectory(prefix="news-editor-") as directory:
+        root = Path(directory)
+        schema = root / "schema.json"
+        schema.write_text(json.dumps(result_type.model_json_schema()))
+        result_path = root / "review.json"
+        command = [executable, "exec", "--ignore-user-config", "--ephemeral",
+                   "--skip-git-repo-check", "--sandbox", "read-only", "-C", directory,
+                   "--disable", "shell_tool", "--disable", "unified_exec", "--disable", "apps",
+                   "--disable", "hooks", "--disable", "browser_use", "--disable", "computer_use",
+                   "-c", 'web_search="disabled"', "--output-schema", str(schema),
+                   "-o", str(result_path), "-"]
+        model = os.environ.get("NEWS_EDITOR_MODEL")
+        if model:
+            command[2:2] = ["--model", model]
+        environment = {key: value for key, value in os.environ.items()
+                       if key in {"PATH", "HOME", "TMPDIR", "CODEX_HOME", "SSL_CERT_FILE", "TERM"}}
+        prompt = prompt_path.read_text() + "\nUNTRUSTED SOURCE PACKETS:\n" + json.dumps(packets, ensure_ascii=False)
+        run = subprocess.run(command, input=prompt, text=True, capture_output=True, env=environment,
+                             timeout=600)
+        if run.returncode or not result_path.exists():
+            raise RuntimeError(f"Editorial review failed (exit {run.returncode}); previous paper retained. {run.stderr[-400:]}")
+        reviewed = result_type.model_validate_json(result_path.read_text())
+        if result_type is ReviewBatch:
+            validate_decisions(reviewed, packets)
+        return reviewed
+
+
+def validate_decisions(reviewed, packets):
+    known = {p["id"]: p for p in packets}
+    if len(reviewed.decisions) != len(known) or {d.id for d in reviewed.decisions} != set(known):
+        raise ValueError("Review must decide every candidate exactly once")
+    for decision in reviewed.decisions:
+        packet = known[decision.id]
+        refs = {c["id"] for c in packet["chunks"]}
+        if decision.duplicate_of and decision.duplicate_of not in known:
+            raise ValueError("Unknown duplicate reference")
+        if not set(decision.evidence).issubset(refs) or any(not set(s.evidence).issubset(refs) for s in decision.sections):
+            raise ValueError("Invalid evidence reference")
+        if decision.decision == "admit":
+            if not decision.evidence or not decision.summary or not decision.headline or packet["wordCount"] < 80:
+                raise ValueError("Admitted story lacks evidence")
+            if decision.quality < 65 or packet["truncated"]:
+                raise ValueError("Admitted story fails quality/completeness gate")
+            if packet["kind"] == "podcast" and (len(decision.sections) < 6 or packet["wordCount"] < 2500):
+                raise ValueError("Podcast requires substantive transcript-based notes")
+            if packet["kind"] == "podcast":
+                cited = {int(ref[1:]) for section in decision.sections for ref in section.evidence}
+                total = len(packet["chunks"])
+                if not cited or min(cited) > max(2, total // 3) or max(cited) < total * .8:
+                    raise ValueError("Podcast notes must cover the beginning and final part of the transcript")
+
+
+def run_editorial(repository, settings, config, review_file=None, prepare_only=False):
+    now = datetime.now(timezone.utc)
+    validation_now = now
+    output = settings.project_root.parent.parent / "data/editorial"
+    output.mkdir(parents=True, exist_ok=True)
+    if review_file:
+        prepared = json.loads((output / "review-request.json").read_text())
+        supplied = json.loads(Path(review_file).read_text())
+        cutoff = parse_datetime(prepared.get("generatedAt"))
+        if supplied.get("requestHash") != prepared.get("requestHash") or not cutoff or not timedelta(0) <= now - cutoff <= timedelta(hours=24):
+            raise ValueError("Review file must match a current prepared review request")
+        if cutoff.astimezone(ZoneInfo(os.environ.get("APP_TIMEZONE", "America/Los_Angeles"))).date() != now.astimezone(ZoneInfo(os.environ.get("APP_TIMEZONE", "America/Los_Angeles"))).date():
+            raise ValueError("Prepare a new review request for today's edition")
+        now = cutoff
+    prompt_path = Path(__file__).resolve().parents[2] / "config/editorial-prompt.md"
+    enabled = {c["name"] for c in config["collectors"] if c.get("enabled", True)}
+    source_config = {c["name"]: c for c in config["collectors"]}
+    edition_date = now.astimezone(ZoneInfo(os.environ.get("APP_TIMEZONE", "America/Los_Angeles"))).date().isoformat()
+    history = load_history(settings.project_root.parent.parent, edition_date)
+    rows = repository.fetch_recent_items(limit_hours=30 * 24)
+    candidates, excluded, counts, seen = [], [], Counter(), set()
+    podcast_sources = set()
+    # Per-source bounds keep a high-volume feed from consuming the review budget.
+    for row in rows:
+        reason = exclusion(row, now) or ("disabled_source" if row["source"] not in enabled else None)
+        raw = json.loads(row.get("raw_json") or "{}")
+        has_audio = bool(audio_url(raw))
+        if not reason and has_audio and row["source"] in LONGFORM:
+            if row["source"] in podcast_sources:
+                excluded.append({"url": row["canonical_url"], "source": row["source"], "reason": "older_podcast_episode"})
+                continue
+            podcast_sources.add(row["source"])
+        prior = prior_match(row["canonical_url"], row["title"], history, edition_date) if not reason else None
+        if prior:
+            excluded.append({"url": row["canonical_url"], "source": row["source"], "reason": "previously_published", "previous": prior})
+            continue
+        if reason:
+            excluded.append({"url": row["canonical_url"], "source": row["source"], "reason": reason})
+            continue
+        if row["canonical_url"] in seen:
+            excluded.append({"url": row["canonical_url"], "source": row["source"], "reason": "duplicate_url"})
+            continue
+        bucket = (row["source"], has_audio, None if has_audio else row["category"])
+        limit = 1 if has_audio and row["source"] in LONGFORM else int(source_config[row["source"]].get("editorial_limit", 8))
+        if counts[bucket] >= limit:
+            excluded.append({"url": row["canonical_url"], "source": row["source"], "reason": "candidate_budget"})
+            continue
+        counts[bucket] += 1
+        seen.add(row["canonical_url"])
+        candidates.append(row)
+    packets = []
+    def prepare(row):
+        try:
+            return content_packet(row, repository, settings.user_agent)
+        except Exception as exc:
+            return {"failed_url": row["canonical_url"], "source": row["source"], "error": str(exc)[:200]}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        for result in pool.map(prepare, candidates):
+            if "failed_url" in result:
+                excluded.append({"url": result["failed_url"], "source": result["source"], "reason": "content_unavailable", "detail": result["error"]})
+            else:
+                packets.append(result)
+    decisions, pending = {}, []
+    policy = hashlib.sha256((POLICY_VERSION + prompt_path.read_text() + os.environ.get("NEWS_EDITOR_MODEL", "default")).encode()).hexdigest()
+    for packet in packets:
+        key = hashlib.sha256((policy + json.dumps({k: v for k, v in packet.items() if k != "inputHash"}, sort_keys=True)).encode()).hexdigest()
+        packet_path = output / f"packet-{packet['id']}.json"
+        packet_path.write_text(json.dumps(packet, ensure_ascii=False, indent=2))
+        cache = output / f"review-{key}.json"
+        if cache.exists():
+            result = ReviewBatch.model_validate_json(cache.read_text())
+            validate_decisions(result, [packet])
+            decisions[packet["id"]] = result.decisions[0].model_dump()
+        else:
+            pending.append((packet, cache))
+    news = [p for p in pending if p[0]["kind"] != "podcast"]
+    selection_prompt = prompt_path.with_name("edition-selection-prompt.md")
+    request_hash = hashlib.sha256((policy + json.dumps(packets, sort_keys=True) + selection_prompt.read_text() + history_hash(history)).encode()).hexdigest()
+    request = {"requestHash": request_hash, "generatedAt": now.isoformat(), "policy": policy,
+               "pending": [p for p, _ in pending], "cachedDecisions": decisions, "packets": packets,
+               "publicationHistory": history, "historyHash": history_hash(history)}
+    (output / "review-request.json").write_text(json.dumps(request, ensure_ascii=False, indent=2))
+    if prepare_only:
+        return {"decisions": decisions, "pending": len(pending), "request": str(output / "review-request.json")}
+    external = None
+    if review_file:
+        external = validate_external_review(json.loads(Path(review_file).read_text()), request_hash, [p for p, _ in pending], validation_now)
+        for decision in external.decisions:
+            decisions[decision.id] = decision.model_dump()
+        news = []
+    batches = [news[i:i + 10] for i in range(0, len(news), 10)]
+    if external is None:
+        batches += [[p] for p in pending if p[0]["kind"] == "podcast"]
+    for i, batch in enumerate(batches):
+        print(f"Editorial review {i + 1}/{len(batches)}: {len(batch)} candidates", flush=True)
+        review = codex_review([p for p, _ in batch], prompt_path, output)
+        for decision in review.decisions:
+            # Edition-wide dedupe is recomputed during assembly, not cached as cross-batch IDs.
+            if decision.duplicate_of:
+                decision.decision = "hold"
+                decision.duplicate_of = None
+            decisions[decision.id] = decision.model_dump()
+            cache = next(c for p, c in batch if p["id"] == decision.id)
+            cache.write_text(ReviewBatch(decisions=[decision]).model_dump_json(indent=2))
+    shortlist = [{**decisions[p["id"]], "source": p["source"], "url": p["url"], "publishedAt": p["publishedAt"]}
+                 for p in packets if decisions[p["id"]]["decision"] == "admit"]
+    selection_key = hashlib.sha256((json.dumps(shortlist, sort_keys=True) + selection_prompt.read_text() + history_hash(history)).encode()).hexdigest()
+    selection_path = output / f"selection-{selection_key}.json"
+    if external is not None:
+        selection = external.selection
+    elif selection_path.exists():
+        selection = EditionSelection.model_validate_json(selection_path.read_text())
+    else:
+        print("Editorial desk: reviewing the complete proposed edition", flush=True)
+        selection = codex_review({"shortlist": shortlist, "previouslyPublished": history}, selection_prompt, output, EditionSelection)
+    known = {s["id"] for s in shortlist}
+    accounted = selection.selected_ids + [s.id for s in selection.excluded]
+    if len(accounted) != len(set(accounted)) or set(accounted) != known or len(selection.selected_ids) > 28:
+        raise ValueError("Final editorial selection must account for each item once, maximum 28")
+    selection_path.write_text(selection.model_dump_json(indent=2))
+    payload = {"policy": policy, "generatedAt": datetime.now(timezone.utc).isoformat(), "packets": packets,
+               "selection": selection.model_dump(),
+               "decisions": decisions, "excluded": excluded, "historyHash": history_hash(history)}
+    if external is not None:
+        payload["reviewProvenance"] = {"mode": "review-file", "reviewer": external.reviewer,
+                                       "requestHash": request_hash, "reviewedAt": external.reviewedAt.isoformat()}
+    temporary = output / "latest.json.tmp"
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+    temporary.replace(output / "latest.json")
+    return payload

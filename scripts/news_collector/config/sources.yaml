@@ -22,6 +22,8 @@ trust_scores:
   ap_top_news: 0.93
   tldr_tech: 0.72
   tldr_ai: 0.72
+  bytebytego: 0.8
+  alphasignal: 0.72
   gdelt: 0.6
   alphavantage_news: 0.7
   alphavantage_movers: 0.82
@@ -29,6 +31,13 @@ trust_scores:
   reddit: 0.4
   newsapi: 0.65
   x_search: 0.45
+  bbc_business: 0.9
+  bbc_science: 0.9
+  bbc_health: 0.9
+  doj_antitrust: 0.96
+  npr_business: 0.9
+  al_jazeera: 0.86
+  krebs_security: 0.9
 
 watchlists:
   tech_entities:
@@ -71,6 +80,8 @@ collectors:
     enabled: true
     category: finance
     url: https://www.sec.gov/rss/news/press.xml
+    edition_sector: Deals & regulation
+    editorial_type: announcement
   - name: guardian
     type: guardian
     enabled: true
@@ -85,11 +96,13 @@ collectors:
     enabled: true
     category: tech
     limit: 20
+    editorial_limit: 16
   - name: techmeme
     type: techmeme
     enabled: true
     category: tech
     url: https://www.techmeme.com/feed.xml
+    editorial_limit: 16
   - name: arxiv_cs_ai
     type: rss
     enabled: true
@@ -121,18 +134,37 @@ collectors:
     category: tech
     unofficial: true
     newsletter: tech
-    url: https://tldr.tech/tech
+    url: https://tldr.tech/api/latest/tech
+    daily_issue: true
     schedule_hours: 3
-    max_items_per_run: 12
+    max_items_per_run: 30
+    editorial_limit: 16
   - name: tldr_ai
     type: tldr
     enabled: true
     category: tech
     unofficial: true
     newsletter: ai
-    url: https://tldr.tech/ai
+    url: https://tldr.tech/api/latest/ai
+    daily_issue: true
     schedule_hours: 3
-    max_items_per_run: 12
+    max_items_per_run: 30
+    editorial_limit: 16
+  - name: bytebytego
+    type: rss
+    enabled: true
+    category: tech
+    editorial_type: analysis
+    url: https://blog.bytebytego.com/feed
+    limit: 10
+  - name: alphasignal
+    type: alphasignal
+    enabled: true
+    category: tech
+    unofficial: true
+    url: https://alphasignal.ai/
+    schedule_hours: 3
+    limit: 20
   - name: ap_top_news
     type: ap
     enabled: true
@@ -146,7 +178,7 @@ collectors:
     cooldown_hours: 24
   - name: x_search
     type: x
-    enabled: true
+    enabled: false
     category: tech
     unofficial: true
     mode: tracked_accounts
@@ -187,7 +219,7 @@ collectors:
       - SECGov
   - name: producthunt
     type: producthunt
-    enabled: true
+    enabled: false
     category: tech
     limit: 20
   - name: reddit
@@ -209,3 +241,162 @@ collectors:
     queries:
       - technology
       - finance
+
+  - name: ars_technica
+    type: rss
+    enabled: true
+    category: tech
+    url: https://feeds.arstechnica.com/arstechnica/index
+    limit: 12
+  - name: the_verge
+    type: rss
+    enabled: true
+    category: tech
+    url: https://www.theverge.com/rss/index.xml
+    limit: 12
+  - name: simon_willison
+    type: rss
+    enabled: true
+    category: tech
+    editorial_type: analysis
+    url: https://simonwillison.net/atom/everything/
+    limit: 8
+  - name: interconnects
+    type: rss
+    enabled: true
+    category: tech
+    editorial_type: analysis
+    url: https://www.interconnects.ai/feed
+    limit: 4
+  - name: latent_space
+    type: rss
+    enabled: true
+    category: tech
+    editorial_type: analysis
+    url: https://www.latent.space/feed
+    limit: 4
+  - name: lenny
+    type: rss
+    enabled: true
+    category: tech
+    editorial_type: podcast
+    url: https://www.lennysnewsletter.com/feed
+    limit: 4
+  - name: dwarkesh
+    type: rss
+    enabled: true
+    category: tech
+    editorial_type: podcast
+    url: https://www.dwarkesh.com/feed
+    limit: 4
+  - name: openai_news
+    type: rss
+    enabled: true
+    category: tech
+    editorial_type: announcement
+    url: https://openai.com/news/rss.xml
+    limit: 8
+  - name: deepmind
+    type: rss
+    enabled: true
+    category: tech
+    editorial_type: announcement
+    url: https://deepmind.google/blog/rss.xml
+    limit: 8
+  - name: huggingface
+    type: rss
+    enabled: true
+    category: tech
+    editorial_type: analysis
+    url: https://huggingface.co/blog/feed.xml
+    limit: 8
+  - name: ft_markets
+    type: rss
+    enabled: true
+    category: finance
+    url: https://www.ft.com/markets?format=rss
+    limit: 12
+  - name: ft_technology
+    type: rss
+    enabled: true
+    category: tech
+    url: https://www.ft.com/technology?format=rss
+    limit: 12
+  - name: federal_reserve
+    type: rss
+    enabled: true
+    category: finance
+    editorial_type: announcement
+    url: https://www.federalreserve.gov/feeds/press_all.xml
+    limit: 8
+    edition_sector: Economy
+  - name: marketwatch
+    type: rss
+    enabled: true
+    category: finance
+    url: https://feeds.content.dowjones.io/public/rss/mw_topstories
+    limit: 10
+  - name: anthropic_news
+    type: newsroom
+    enabled: true
+    category: tech
+    url: https://www.anthropic.com/news
+    limit: 6
+  - name: theo_video
+    type: rss
+    enabled: true
+    category: tech
+    editorial_type: analysis
+    url: https://www.youtube.com/feeds/videos.xml?channel_id=UCbRP3c757lWg9M-U7TyEkXA
+    limit: 3
+
+  - name: bbc_business
+    type: rss
+    enabled: true
+    category: finance
+    edition_sector: Economy
+    url: https://feeds.bbci.co.uk/news/business/rss.xml
+    limit: 20
+    editorial_limit: 12
+  - name: doj_antitrust
+    type: rss
+    enabled: true
+    category: finance
+    editorial_type: announcement
+    edition_sector: Deals & regulation
+    url: https://www.justice.gov/news/rss?field_component=376&search_api_language=en
+    limit: 10
+  - name: npr_business
+    type: rss
+    enabled: true
+    category: finance
+    edition_sector: Economy
+    url: https://feeds.npr.org/1006/rss.xml
+    limit: 12
+  - name: al_jazeera
+    type: rss
+    enabled: true
+    category: world
+    url: https://www.aljazeera.com/xml/rss/all.xml
+    limit: 20
+    editorial_limit: 12
+  - name: bbc_science
+    type: rss
+    enabled: true
+    category: other
+    edition_sector: Science & health
+    url: https://feeds.bbci.co.uk/news/science_and_environment/rss.xml
+    limit: 10
+  - name: bbc_health
+    type: rss
+    enabled: true
+    category: other
+    edition_sector: Science & health
+    url: https://feeds.bbci.co.uk/news/health/rss.xml
+    limit: 10
+  - name: krebs_security
+    type: rss
+    enabled: true
+    category: tech
+    url: https://krebsonsecurity.com/feed/
+    limit: 8

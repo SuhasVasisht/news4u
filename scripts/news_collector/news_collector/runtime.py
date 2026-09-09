@@ -16,6 +16,8 @@ from news_collector.collectors import (
     XSearchCollector,
 )
 from news_collector.collectors.base import CollectorContext
+from news_collector.collectors.newsroom import NewsroomCollector
+from news_collector.collectors.alphasignal import AlphaSignalCollector
 from news_collector.config import load_config
 from news_collector.settings import get_settings
 from news_collector.storage.db import Database
@@ -23,6 +25,8 @@ from news_collector.storage.repository import Repository
 
 
 COLLECTOR_TYPES = {
+    "alphasignal": AlphaSignalCollector,
+    "newsroom": NewsroomCollector,
     "rss": RSSCollector,
     "guardian": GuardianCollector,
     "hackernews": HackerNewsCollector,

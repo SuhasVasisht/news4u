@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import json
 import re
+from html import unescape
+from urllib.parse import urlparse
+
+from selectolax.parser import HTMLParser
 
 from news_collector.collectors.base import BaseCollector, CollectorDegraded
 from news_collector.models import RawItem
@@ -13,13 +17,16 @@ class TLDRCollector(BaseCollector):
 
     def collect(self) -> list[RawItem]:
         html = self._fetch_story_html()
-        stories = self._extract_story_blobs(html)
+        stories = (self._extract_issue_stories(html, self.context.config.get("newsletter"))
+                   if self.context.config.get("daily_issue") else self._extract_story_blobs(html))
         newsletter = self.context.config.get("newsletter")
         items: list[RawItem] = []
         for story in stories:
             if newsletter and story.get("newsletter") != newsletter:
                 continue
             title = story.get("title", "")
+            if re.search(r"\b(sponsor|sponsored)\b", title, re.I):
+                continue
             summary = story.get("tldr")
             items.append(
                 RawItem(
@@ -53,6 +60,8 @@ class TLDRCollector(BaseCollector):
         primary_response = self.client.get(self.context.config["url"])
         primary_response.raise_for_status()
         primary_html = primary_response.text
+        if self.context.config.get("daily_issue"):
+            return primary_html
         if self._extract_story_blobs(primary_html):
             return primary_html
         fallback_response = self.client.get("https://tldr.tech")
@@ -60,7 +69,55 @@ class TLDRCollector(BaseCollector):
         return fallback_response.text
 
     @staticmethod
+    def _extract_issue_stories(html: str, newsletter: str) -> list[dict]:
+        page = HTMLParser(html)
+        heading = page.css_first("h1")
+        date = re.search(r"\b\d{4}-\d{2}-\d{2}\b", heading.text() if heading else "")
+        if not date:
+            return []
+        stories = {}
+        for article in page.css("article"):
+            link = article.css_first("a:has(h3)")
+            summary = article.css_first(".newsletter-html")
+            if not link or not summary:
+                continue
+            title = link.text().strip()
+            url = unescape(link.attributes.get("href", ""))
+            host = urlparse(url).hostname or ""
+            if (urlparse(url).scheme not in {"http", "https"}
+                    or re.search(r"\b(sponsor|sponsored)\b", title, re.I)
+                    or host in {"jobs.ashbyhq.com", "jobs.tldr.tech"}):
+                continue
+            title = re.sub(r"\s*\((?:\d+ minute read|GitHub Repo|\d+ minute video)\)\s*$", "", title)
+            stories[url] = {"title": title, "url": url, "tldr": summary.text(separator=" ").strip(),
+                            "newsletter": newsletter, "newsletter_date": date.group(),
+                            "_newsletter_url": f"https://tldr.tech/{newsletter}/{date.group()}"}
+        return list(stories.values())
+
+    @staticmethod
     def _extract_story_blobs(html: str) -> list[dict]:
+        decoder = json.JSONDecoder()
+        chunks = []
+        for match in re.finditer(r'self\.__next_f\.push\(', html):
+            try:
+                payload, _ = decoder.raw_decode(html[match.end():])
+                if isinstance(payload, list) and len(payload) > 1 and isinstance(payload[1], str):
+                    chunks.append(payload[1])
+            except (ValueError, TypeError):
+                continue
+        decoded_html = "".join(chunks)
+        found = {}
+        for match in re.finditer(r'"(?:featuredStories|product|ai|tech)"\s*:\s*', decoded_html):
+            try:
+                values, _ = decoder.raw_decode(decoded_html[match.end():])
+                if isinstance(values, list):
+                    for story in values:
+                        if isinstance(story, dict) and story.get("url") and story.get("title"):
+                            found[story["url"]] = story
+            except (ValueError, TypeError):
+                continue
+        if found:
+            return list(found.values())
         for pattern in (
             r'featuredStories\\":(\[.*?\])[,}]',
             r'product\\":(\[.*?\])[,}]',

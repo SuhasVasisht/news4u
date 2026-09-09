@@ -28,7 +28,7 @@ class RSSCollector(BaseCollector):
         response.raise_for_status()
         parsed = feedparser.parse(response.content)
         items: list[RawItem] = []
-        for entry in parsed.entries:
+        for entry in parsed.entries[:int(self.context.config.get("limit", 20))]:
             title = (entry.get("title") or "").strip()
             summary = (entry.get("summary") or entry.get("description") or "").strip()
             items.append(
@@ -59,9 +59,12 @@ class RSSCollector(BaseCollector):
         if not parsed.entries and "arxiv.org/rss/" in self.context.config["url"]:
             return self._fallback_arxiv_items()
         items: list[RawItem] = []
-        for entry in parsed.entries:
+        for entry in parsed.entries[:int(self.context.config.get("limit", 30))]:
             title = (entry.get("title") or "").strip()
             summary = entry.get("summary") or entry.get("description")
+            content = "\n".join(part.get("value", "") for part in entry.get("content", []))
+            entry["_editorial_type"] = self.context.config.get("editorial_type", "reporting")
+            entry["_edition_sector"] = self.context.config.get("edition_sector")
             items.append(
                 RawItem(
                     source=self.name,
@@ -73,7 +76,7 @@ class RSSCollector(BaseCollector):
                     published_at=parse_datetime(entry.get("published") or entry.get("updated")),
                     author=entry.get("author"),
                     summary=summary,
-                    text=self.resolve_text(entry.get("link", ""), summary),
+                    text=content or self.resolve_text(entry.get("link", ""), summary),
                     image_url=self.resolve_image(
                         entry.get("link", ""),
                         extract_image_from_feed_entry(dict(entry)),

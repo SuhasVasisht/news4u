@@ -1,0 +1,35 @@
+services:
+  static-web:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - ./out:/srv:ro
+      - ./Caddyfile.static:/etc/caddy/Caddyfile:ro
+    read_only: true
+    tmpfs:
+      - /data
+      - /config
+      - /tmp
+  static-builder:
+    build:
+      context: .
+      target: worker-runner
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PYTHON_BIN: /opt/venv/bin/python
+      APP_TIMEZONE: America/Los_Angeles
+      NEWS_COLLECTOR_DB_PATH: /app/scripts/news_collector/data/news_collector.db
+      NEWS_COLLECTOR_OUTPUT_DIR: /app/scripts/news_collector/output
+      CODEX_HOME: /root/.codex
+      HF_HOME: /app/scripts/news_collector/data/huggingface
+    volumes:
+      - ./data:/app/data
+      - ./out:/app/out
+      - ./scripts/news_collector/data:/app/scripts/news_collector/data
+      - ./scripts/news_collector/output:/app/scripts/news_collector/output
+      - ./logs/scheduler:/var/log/news-app
+      - ${NEWS_EDITOR_AUTH_DIR:-./data/editor-auth}:/root/.codex
+    command: ["sh", "/app/scripts/static-scheduler.sh"]

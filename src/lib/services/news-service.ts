@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, asc, desc, eq, inArray, isNotNull, lt, ne } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, lt } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb, hasDatabase } from "@/lib/db/client";
 import { collectorImportanceToArticleScore } from "@/lib/scoring";
@@ -735,7 +735,7 @@ function scoreStory(
   const freshness = Math.max(0, 100 - (freshnessHours / 36) * 100);
   const momentum = Math.min(story.updateCount, 5) * 20;
   const techBoost = "topicSlugs" in story && storyHasTechSignal(story as RankableStory) ? 14 : 0;
-  const corroborationBoost = "sourceCount" in story ? Math.min(story.sourceCount, 4) * 2.5 : 0;
+  const corroborationBoost = "sourceCount" in story && typeof story.sourceCount === "number" ? Math.min(story.sourceCount, 4) * 2.5 : 0;
   return 0.6 * story.importanceScore + 0.25 * freshness + 0.15 * momentum + techBoost + corroborationBoost;
 }
 

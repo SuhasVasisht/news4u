@@ -8,3 +8,7 @@ scripts/news_collector/.venv
 scripts/news_collector/.pytest_cache
 scripts/news_collector/data
 scripts/news_collector/output
+data
+out
+designs
+logs

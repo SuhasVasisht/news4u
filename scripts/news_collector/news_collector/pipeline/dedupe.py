@@ -23,6 +23,8 @@ def cluster_items(rows: Iterable[dict]) -> list[StoryCluster]:
         row_entities = set(json.loads(row["entities_json"]))
         for group in groups:
             candidate = group[0]
+            row_date = parse_datetime(row.get("published_at"))
+            candidate_date = parse_datetime(candidate.get("published_at"))
             score = fuzz.ratio(row_title, normalize_title(candidate["title"]))
             candidate_entities = set(json.loads(candidate["entities_json"]))
             candidate_symbols = set(json.loads(candidate["symbols_json"]))
@@ -39,6 +41,8 @@ def cluster_items(rows: Iterable[dict]) -> list[StoryCluster]:
                 and row["canonical_url"] == candidate["canonical_url"]
                 and not homepage_overlap
             ):
+                continue
+            if row_date and candidate_date and abs((row_date - candidate_date).total_seconds()) > 72 * 3600:
                 continue
             if score >= 92 or (score >= 85 and row_entities and candidate_entities and row_entities & candidate_entities):
                 group.append(row)
@@ -62,7 +66,7 @@ def cluster_items(rows: Iterable[dict]) -> list[StoryCluster]:
                 representative_source=representative["source"],
                 published_at=parse_datetime(representative.get("published_at")),
                 image_url=representative.get("image_url"),
-                confirmation_count=len(group),
+                confirmation_count=len({(urlparse(row["canonical_url"]).hostname or "").removeprefix("www.") for row in group}),
                 entities=entities[:10],
                 symbols=symbols[:10],
                 item_ids=[row["id"] for row in group],

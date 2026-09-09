@@ -41,6 +41,7 @@ class BaseCollector:
     def __init__(self, context: CollectorContext):
         self.context = context
         self._force_run = False
+        self._used_cache = False
         timeout = float(context.defaults.get("request_timeout_seconds", 20))
         self.client = get_http_client(context.settings.user_agent, timeout=timeout)
 
@@ -75,13 +76,14 @@ class BaseCollector:
                 age = datetime.now(timezone.utc) - datetime.fromisoformat(cached_at)
             except ValueError:
                 age = None
-            if age is not None and age <= timedelta(hours=max_age_hours):
+            if age is not None and timedelta(0) <= age <= timedelta(hours=max_age_hours):
                 for payload in serialized:
                     try:
                         items.append(RawItem.model_validate(payload))
                     except Exception:
                         continue
         if items:
+            self._used_cache = True
             return items
         fallback_rows = self.repository.fetch_recent_raw_items_by_source(
             self.name,
@@ -113,6 +115,8 @@ class BaseCollector:
                 )
             except Exception:
                 continue
+        if items:
+            self._used_cache = True
         return items
 
     def is_in_cooldown(self, state: dict[str, Any]) -> tuple[bool, str | None]:
@@ -155,14 +159,15 @@ class BaseCollector:
         max_seconds = float(delay.get("max", min_seconds))
         self.sleep_range(min_seconds, max_seconds)
 
-    def run(self, force: bool = False) -> CollectorRunResult:
+    def run(self, force: bool = False, check_now: bool = False) -> CollectorRunResult:
         state = self.get_state()
         self._force_run = force
+        self._used_cache = False
         if not force:
             in_cooldown, until = self.is_in_cooldown(state)
             if in_cooldown:
                 return CollectorRunResult(self.name, "degraded", reason=f"cooldown until {until}", stats=state)
-            if not self.should_run_on_schedule(state):
+            if not check_now and not self.should_run_on_schedule(state):
                 return CollectorRunResult(self.name, "skipped", reason="scheduled later", stats=state)
 
         if not force:
@@ -178,28 +183,41 @@ class BaseCollector:
                 state["last_blocked_at"] = self.now_iso()
                 state["cooldown_until"] = (datetime.now(timezone.utc) + timedelta(hours=cooldown_hours)).isoformat()
                 state["last_reason"] = str(exc)
+                state["last_status"] = "degraded"
                 self.set_state(state)
             return CollectorRunResult(self.name, "degraded", reason=str(exc), stats=state)
         except Exception as exc:
-            return CollectorRunResult(self.name, "error", reason=str(exc), stats=state)
+            state["last_status"] = "error"
+            state["last_reason"] = str(exc).split("?", 1)[0]
+            self.set_state(state)
+            return CollectorRunResult(self.name, "error", reason=state["last_reason"], stats=state)
         finally:
             self._force_run = False
 
         state = self.get_state()
-        if items:
+        if items and not self._used_cache:
             state["last_success_items_at"] = self.now_iso()
             state["last_success_items"] = [item.model_dump(mode="json") for item in items[:25]]
-        if not force:
+        if not force and not self._used_cache:
             state["last_success_at"] = self.now_iso()
             state["cooldown_until"] = None
             state["last_reason"] = None
-            state["consecutive_zero_runs"] = int(state.get("consecutive_zero_runs", 0)) + (0 if items else 1)
+            state["consecutive_zero_runs"] = 0 if items else int(state.get("consecutive_zero_runs", 0)) + 1
+        state["last_status"] = "ok" if items else "degraded"
+        if self._used_cache:
+            state["last_status"] = "cached"
+            state["last_reason"] = "Using cached items; upstream did not provide a fresh response"
+        elif items and state.get("collection_warning"):
+            state["last_status"] = "partial"
+            state["last_reason"] = state["collection_warning"]
+        if not items:
+            state["last_reason"] = "collector returned zero items"
         self.set_state(state)
         return CollectorRunResult(
             self.name,
-            "ok" if items else "degraded",
+            state["last_status"],
             items=items,
-            reason=None if items else "collector returned zero items",
+            reason=state.get("last_reason") if self._used_cache or state.get("collection_warning") else None if items else "collector returned zero items",
             stats=state,
         )
 

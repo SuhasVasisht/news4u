@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from news_collector.pipeline.images import prepare_images
+
 import hashlib
 import json
 from dataclasses import dataclass
@@ -359,6 +361,7 @@ def publish_articles(
     for row in rows:
         raw_item = raw_item_from_row(row)
         enriched_item, used_page_fetch = enrich_item(raw_item, repository, client)
+        prepare_images([enriched_item], repository, settings.user_agent)
         repository.update_raw_item_content(row["id"], enriched_item.text, enriched_item.image_url)
         repository.update_normalized_item_content(canonicalize_url(enriched_item.url), enriched_item.text, enriched_item.image_url)
         payload = build_sync_article(

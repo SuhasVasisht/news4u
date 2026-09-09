@@ -90,6 +90,11 @@ CREATE TABLE IF NOT EXISTS media_cache (
     checked_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS image_quality_cache (
+    canonical_url TEXT PRIMARY KEY,
+    result_json TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS content_cache (
     canonical_url TEXT PRIMARY KEY,
     content_text TEXT,
@@ -115,6 +120,7 @@ class Database:
         ensure_parent_dir(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(SCHEMA)
             self._migrate(conn)
 
@@ -149,7 +155,7 @@ class Database:
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.path)
+        conn = sqlite3.connect(self.path, timeout=30)
         conn.row_factory = sqlite3.Row
         try:
             yield conn

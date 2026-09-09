@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from news_collector.models import RawItem
 
 
@@ -10,8 +12,8 @@ POLITICS_TERMS = {"election", "white house", "parliament", "congress", "ministry
 
 def classify_item(item: RawItem) -> str:
     text = " ".join(filter(None, [item.title, item.summary or "", " ".join(item.tags)])).lower()
-    tokens = set(text.replace("/", " ").replace("-", " ").split())
-    if any(term in text for term in FINANCE_TERMS):
+    tokens = set(re.findall(r"\b[a-z]+\b", text))
+    if FINANCE_TERMS & tokens:
         return "finance"
     if item.source in {"alphavantage_news", "alphavantage_movers", "sec_press"}:
         return "finance"

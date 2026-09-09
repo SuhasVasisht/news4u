@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 
 from news_collector.collectors.ap import APCollector
 from news_collector.collectors.alpha_vantage import AlphaVantageNewsCollector
@@ -37,6 +38,18 @@ def make_settings(tmp_path):
 
 def make_repository(tmp_path):
     return Repository(Database(tmp_path / "news.db"))
+
+
+def test_check_now_bypasses_schedule_but_respects_upstream_cooldown(tmp_path):
+    collector = RSSCollector(CollectorContext(name="scheduled", config={"category": "tech", "schedule_hours": 3},
+                             defaults={}, settings=make_settings(tmp_path), repository=make_repository(tmp_path)))
+    current = datetime.now(timezone.utc)
+    collector.set_state({"last_run_at": current.isoformat()})
+    assert collector.run().status == "skipped"
+    collector.collect = lambda: []
+    assert collector.run(check_now=True).reason == "collector returned zero items"
+    collector.set_state({"cooldown_until": (current + timedelta(hours=1)).isoformat()})
+    assert "cooldown until" in collector.run(check_now=True).reason
 
 
 def test_rss_collector_parses_feed(tmp_path):
@@ -225,6 +238,27 @@ def test_ap_collector_force_run_ignores_seen_urls(tmp_path):
     assert len(items) == 1
 
 
+def test_ap_scans_past_seen_links_and_bounds_failed_requests(tmp_path):
+    collector = APCollector(CollectorContext(
+        name="ap_top_news",
+        config={"url": "https://apnews.com/hub/apf-topnews", "category": "world", "max_requests_per_run": 1},
+        defaults={"request_timeout_seconds": 5}, settings=make_settings(tmp_path),
+        repository=make_repository(tmp_path)))
+    urls = [f"https://apnews.com/article/story-{i}" for i in range(4)]
+    collector.set_state({"seen_urls": urls[:2]})
+    collector.client = FakeClient({
+        "https://apnews.com/hub/apf-topnews": FakeResponse(text="".join(f'<a href="{url}">Story</a>' for url in urls)),
+        urls[2]: FakeResponse(text="<title>New report</title>"),
+    })
+    assert collector.collect()[0].title == "New report"
+    collector.set_state({"seen_urls": urls[:2]})
+    collector.client = FakeClient({
+        "https://apnews.com/hub/apf-topnews": FakeResponse(text="".join(f'<a href="{url}">Story</a>' for url in urls)),
+        urls[2]: FakeResponse(status_code=503),
+    })
+    assert collector.collect() == []
+
+
 def test_gdelt_collector_wraps_or_queries(tmp_path):
     collector = GDELTCollector(
         CollectorContext(
@@ -243,7 +277,8 @@ def test_gdelt_collector_wraps_or_queries(tmp_path):
                     ("format", "json"),
                     ("maxrecords", 10),
                     ("mode", "artlist"),
-                    ("query", "(ai OR semiconductor OR cloud)"),
+                    ("query", "(ai OR semiconductor OR cloud) sourcelang:english"),
+                    ("timespan", "48h"),
                 ),
             ): FakeResponse(json_data={"articles": []})
         }
@@ -299,7 +334,7 @@ def test_alpha_vantage_news_uses_cached_items_when_rate_limited(tmp_path):
     )
     collector.set_state(
         {
-            "last_success_items_at": "2026-04-18T12:00:00+00:00",
+            "last_success_items_at": datetime.now(timezone.utc).isoformat(),
             "last_success_items": [
                 {
                     "source": "alphavantage_news",
@@ -326,6 +361,23 @@ def test_alpha_vantage_news_uses_cached_items_when_rate_limited(tmp_path):
     items = collector.collect()
     assert len(items) == 1
     assert items[0].title == "Cached market story"
+
+
+def test_alpha_vantage_keeps_fresh_topic_when_next_topic_hits_quota(tmp_path, monkeypatch):
+    collector = AlphaVantageNewsCollector(CollectorContext(
+        name="alphavantage_news", config={"category": "finance", "topics": ["technology", "mergers_and_acquisitions"]},
+        defaults={"request_timeout_seconds": 5}, settings=make_settings(tmp_path), repository=make_repository(tmp_path)))
+    monkeypatch.setattr(collector, "resolve_text", lambda url, summary: summary)
+    monkeypatch.setattr(collector, "resolve_image", lambda *args: None)
+    collector.client = FakeClient({
+        ("https://www.alphavantage.co/query", (("apikey", "demo"), ("function", "NEWS_SENTIMENT"), ("limit", 10), ("topics", "technology"))):
+            FakeResponse(json_data={"feed": [{"title": "Fresh technology report", "url": "https://example.com/fresh", "summary": "New reporting"}]}),
+        ("https://www.alphavantage.co/query", (("apikey", "demo"), ("function", "NEWS_SENTIMENT"), ("limit", 10), ("topics", "mergers_and_acquisitions"))):
+            FakeResponse(json_data={"Note": "Rate limit reached"})})
+    result = collector.run(force=True)
+    assert result.status == "partial"
+    assert result.items[0].title == "Fresh technology report"
+    assert "Rate limit" in result.reason
 
 
 def test_techmeme_collector_parses_primary_link_and_image(tmp_path):
