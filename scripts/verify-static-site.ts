@@ -2,7 +2,7 @@ import { chromium, expect } from "@playwright/test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { briefingStories, editionSchema } from "../src/lib/edition";
+import { briefingStories, editionSchema, sportsGamesForDisplay } from "../src/lib/edition";
 import { hash } from "./lib/static-release";
 import { embeddedEdition } from "./lib/edition-archive";
 
@@ -32,6 +32,28 @@ export async function verifyStaticSite(base: string, root = process.cwd()) {
     if (images.some(image => image.width < 400 || image.height < 200)) throw new Error("Unusable image rendered on hosted site");
     if (edition.stories.some(story => story.image) && !images.length) throw new Error("None of the edition's images loaded");
     await page.screenshot({ path: path.join(output, "desktop.png") });
+    if (edition.sports) {
+      const sports = page.locator("#sector-sports");
+      await expect(page.locator(".news-sector").last()).toHaveAttribute("id", "sector-sports");
+      await expect(sports.locator(".major-report, .brief")).toHaveCount(edition.stories.filter(s => s.sportsGroup).length);
+      await expect(sports.locator(".sports-header time")).toHaveAttribute("datetime", edition.sports.checkedAt);
+      for (const league of edition.sports.leagues) {
+        const details = sports.locator(".sports-league").filter({ has: page.locator("summary", { hasText: league.name }) });
+        await details.evaluate(element => { (element as HTMLDetailsElement).open = true; });
+        for (const game of sportsGamesForDisplay(league.games)) {
+          const link = details.locator(".sports-games a").filter({ hasText: game.away.name });
+          await expect(link).toContainText(game.home.name);
+          await expect(link.locator("strong")).toHaveText([game.away.score ?? "-", game.home.score ?? "-"]);
+        }
+      }
+      for (const width of [1440, 390, 320]) {
+        await page.setViewportSize({ width, height: 1000 });
+        await sports.evaluate(element => element.scrollIntoView({ block: "start", behavior: "instant" }));
+        if (!await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)) throw new Error(`Sports overflow at ${width}px`);
+        await page.screenshot({ path: path.join(output, `sports-${width}.png`) });
+      }
+      await page.setViewportSize({ width: 1440, height: 1000 });
+    }
     for (const sector of await page.locator(".news-sector").all()) {
       await sector.evaluate(element => element.scrollIntoView({ block: "start", behavior: "instant" }));
       const id = (await sector.getAttribute("id"))!.replace(/[^a-z0-9-]/gi, "-");

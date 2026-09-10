@@ -1,0 +1,20 @@
+enabled: true
+feeds:
+  - {name: espn_nfl, group: NFL, url: 'https://www.espn.com/espn/rss/nfl/news'}
+  - {name: guardian_nfl, group: NFL, url: 'https://www.theguardian.com/sport/nfl/rss'}
+  - {name: espn_nba, group: NBA, url: 'https://www.espn.com/espn/rss/nba/news'}
+  - {name: guardian_nba, group: NBA, url: 'https://www.theguardian.com/sport/nba/rss'}
+  - {name: bbc_football, group: Soccer, url: 'https://feeds.bbci.co.uk/sport/football/rss.xml'}
+  - {name: espn_soccer, group: Soccer, url: 'https://www.espn.com/espn/rss/soccer/news'}
+  - {name: guardian_football, group: Soccer, url: 'https://www.theguardian.com/football/rss'}
+  - {name: bbc_sport, group: Elsewhere, url: 'https://feeds.bbci.co.uk/sport/rss.xml'}
+leagues:
+  - {id: nfl, group: NFL, name: NFL, path: football/nfl, url: 'https://www.espn.com/nfl/scoreboard'}
+  - {id: nba, group: NBA, name: NBA, path: basketball/nba, url: 'https://www.espn.com/nba/scoreboard'}
+  - {id: ucl, group: Soccer, name: Champions League, path: soccer/uefa.champions, url: 'https://www.espn.com/soccer/scoreboard/_/league/uefa.champions'}
+  - {id: epl, group: Soccer, name: Premier League, path: soccer/eng.1, url: 'https://www.espn.com/soccer/scoreboard/_/league/eng.1'}
+  - {id: laliga, group: Soccer, name: La Liga, path: soccer/esp.1, url: 'https://www.espn.com/soccer/scoreboard/_/league/esp.1'}
+  - {id: bundesliga, group: Soccer, name: Bundesliga, path: soccer/ger.1, url: 'https://www.espn.com/soccer/scoreboard/_/league/ger.1'}
+  - {id: seriea, group: Soccer, name: Serie A, path: soccer/ita.1, url: 'https://www.espn.com/soccer/scoreboard/_/league/ita.1'}
+  - {id: mls, group: Soccer, name: MLS, path: soccer/usa.1, url: 'https://www.espn.com/soccer/scoreboard/_/league/usa.1'}
+  - {id: nwsl, group: Soccer, name: NWSL, path: soccer/usa.nwsl, url: 'https://www.espn.com/soccer/scoreboard/_/league/usa.nwsl'}

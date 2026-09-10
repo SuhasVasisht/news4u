@@ -250,6 +250,15 @@ def main() -> None:
     collection = json.loads(collection_path.read_text()) if collection_path.exists() else None
     source_audit = audit_sources(config, repository, discoveries, review, snapshot, now, collection)
     snapshot["sources"] = source_audit
+    from news_collector.pipeline.sports import config_for, attach_sports
+    if config_for(settings).get("enabled", True):
+        sports_path = settings.project_root.parent.parent / "data/sports/latest.json"
+        if not sports_path.exists():
+            raise RuntimeError("Sports review required; run the sports pipeline before export")
+        attach_sports(snapshot, json.loads(sports_path.read_text()), now)
+        audit["sports"] = {"stories": sum(s.get("sportsGroup") is not None for s in snapshot["stories"]), "checkedAt": snapshot["sports"]["checkedAt"]}
+        audit["selected_stories"] = len(snapshot["stories"])
+        audit["image_quality"] = verify_snapshot_images(snapshot, repository)
     audit["source_health"] = source_audit
     audit["historical_raw_counts_not_semantic_duplicates"] = raw_stats
     root = settings.project_root.parent.parent

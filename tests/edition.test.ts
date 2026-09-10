@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { briefingStories, dateInZone, editionStorySchema, parseReaderState, sectorStories, validateBuildFreshness, type EditionStory, type EditionData } from "@/lib/edition";
+import { briefingStories, dateInZone, editionStorySchema, parseReaderState, sectorStories, sportsGamesForDisplay, validateBuildFreshness, type EditionStory, type EditionData, type SportsData } from "@/lib/edition";
 
 const story: EditionStory = { id: "a", title: "Report", summary: "Summary", sector: "Technology", url: "https://example.com/a", image: null, publishedAt: "2026-09-08T07:30:00Z", score: 8, publisher: "Example", collectors: ["rss"], coverage: [] };
 describe("shared edition", () => {
@@ -49,5 +49,19 @@ describe("shared edition", () => {
   it("retains saved excerpts even after the daily feed changes", () => {
     const state = parseReaderState({ saved: [story.id], library: [story] });
     expect(state.library[0].title).toBe(story.title);
+  });
+  it("retains sports metadata and rejects yesterday's score snapshot", () => {
+    const sportsStory = editionStorySchema.parse({ ...story, sector: "Sports", sportsGroup: "NFL" });
+    expect(sportsStory.sportsGroup).toBe("NFL");
+    const edition: EditionData = { date: "2026-09-08", generatedAt: "2026-09-08T08:00:00Z", timezone: "America/Los_Angeles", windowHours: 48, stories: [story], sources: [], sports: { checkedAt: "2026-09-08T06:00:00Z", windowStart: "2026-09-07T06:00:00Z", windowEnd: "2026-09-09T06:00:00Z", leagues: [] } };
+    expect(() => validateBuildFreshness(edition, new Date("2026-09-08T09:00:00Z"))).toThrow(/Sports/);
+  });
+  it("keeps upcoming fixtures visible without crowding out recent results", () => {
+    const games: SportsData["leagues"][number]["games"] = Array.from({ length: 9 }, (_, i) => ({ id: String(i), date: `2026-09-08T${String(i + 10).padStart(2, "0")}:00:00Z`, state: i < 6 ? "post" : "pre", completed: i < 6, detail: i < 6 ? "Final" : "Scheduled", url: "https://example.com/game", home: { name: "Home", score: i < 6 ? "2" : null }, away: { name: "Away", score: i < 6 ? "1" : null } }));
+    const selected = sportsGamesForDisplay(games);
+    expect(selected).toHaveLength(6);
+    expect(selected.filter(g => g.completed)).toHaveLength(4);
+    expect(selected.filter(g => g.state === "pre").map(g => g.id)).toEqual(["6", "7"]);
+    expect(games[0].id).toBe("0");
   });
 });

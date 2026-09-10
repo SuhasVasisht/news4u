@@ -38,7 +38,7 @@ async function main() {
     // Domain-only retries verify the already uploaded release, even after its publication day.
     const { bundle, manifest } = process.argv.includes("--skip-upload")
       ? { bundle: path.join(root, "data/cloudflare-bundle"), manifest: JSON.parse(await readFile(path.join(root, "data/cloudflare-bundle/edition-manifest.json"), "utf8")) as { date: string; generatedAt: string; stories: number } }
-      : await prepareRelease(root, secrets, { reviseToday: process.argv.includes("--revise-today") });
+      : await prepareRelease(root, secrets, { reviseToday: process.argv.includes("--revise-today"), designOnly: process.argv.includes("--design-only") });
     if (!process.argv.includes("--skip-upload")) {
       await verifyLocalRelease(root, bundle);
       console.log(`Deploying ${manifest.stories} stories for ${manifest.date} to ${config.project}`);

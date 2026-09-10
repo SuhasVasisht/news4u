@@ -3,6 +3,7 @@ import { readFile, writeFile, mkdir, readdir, lstat, mkdtemp, rename, rm, cp } f
 import path from "node:path";
 import { editionSchema, validateBuildFreshness, type EditionData } from "../../src/lib/edition";
 import { archiveEdition, archiveIndex, embeddedEdition } from "./edition-archive";
+import { verifyDesignOnly } from "./design-only";
 
 export const hash = (body: string | Buffer) => createHash("sha256").update(body).digest("hex");
 
@@ -56,9 +57,10 @@ export function assertPublicFile(name: string, body: Buffer, secrets: string[]) 
   if (secrets.some(value => value.length >= 12 && body.includes(value))) throw new Error(`Credential found in public file: ${name}`);
 }
 
-export async function prepareRelease(root: string, secrets: string[], options: { reviseToday?: boolean } = {}) {
+export async function prepareRelease(root: string, secrets: string[], options: { reviseToday?: boolean; designOnly?: boolean } = {}) {
   const edition = editionSchema.parse(JSON.parse(await readFile(path.join(root, "data/edition.json"), "utf8")));
-  validateBuildFreshness(edition);
+  if (options.designOnly) await verifyDesignOnly(root, edition);
+  else validateBuildFreshness(edition);
   if (!edition.editorialReviewedAt) throw new Error("Only editorially reviewed editions can be deployed");
   const index = await readFile(path.join(root, "out/index.html"), "utf8");
   const embedded = index.match(/<script type="application\/json" id="edition-data">([\s\S]*?)<\/script>/)?.[1];
@@ -102,7 +104,7 @@ export async function prepareRelease(root: string, secrets: string[], options: {
     await writeFile(path.join(bundle, name), body);
   }
   if (previous && previous.date !== edition.date) await archiveEdition(bundle, previous, key);
-  await archiveEdition(bundle, edition, key, options.reviseToday);
+  await archiveEdition(bundle, edition, key, options.reviseToday, options.designOnly);
   const editions = await archiveIndex(bundle, key);
   const revisions = [];
   for (const name of await readdir(path.join(bundle, "editions"))) {

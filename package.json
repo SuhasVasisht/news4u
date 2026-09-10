@@ -9,6 +9,8 @@
     "build:daily": "tsx scripts/build-static.tsx --collect",
     "review:prepare": "tsx scripts/build-static.tsx --collect --prepare-review",
     "review:apply": "tsx scripts/build-static.tsx --review-file",
+    "sports:prepare": "tsx scripts/build-static.tsx --prepare-sports",
+    "sports:apply": "tsx scripts/build-static.tsx --sports-review-file",
     "deploy:static": "tsx scripts/deploy-cloudflare.ts",
     "verify:deployed": "tsx scripts/verify-static-site.ts",
     "publish:daily": "npm test && npm run test:collector && npm run build:daily && npm run deploy:static",

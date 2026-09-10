@@ -1,9 +1,31 @@
 import { z } from "zod";
 
 const webUrl = z.string().url().refine((value) => /^https?:\/\//i.test(value), "HTTP(S) URL required");
+const sportsGroup = z.enum(["NFL", "Soccer", "NBA", "Elsewhere"]);
+export const sportsSchema = z.object({
+  checkedAt: z.string().datetime({ offset: true }), windowStart: z.string().datetime({ offset: true }), windowEnd: z.string().datetime({ offset: true }),
+  leagues: z.array(z.object({
+    id: z.string(), group: sportsGroup, name: z.string(), url: webUrl, season: z.string(),
+    scheduleStatus: z.enum(["ok", "unavailable"]), standingsStatus: z.enum(["ok", "unavailable"]),
+    games: z.array(z.object({
+      id: z.string(), date: z.string().datetime({ offset: true }), state: z.enum(["pre", "in", "post"]), completed: z.boolean(), detail: z.string(), url: webUrl,
+      home: z.object({ name: z.string(), score: z.string().nullable() }), away: z.object({ name: z.string(), score: z.string().nullable() }),
+    })),
+    tables: z.array(z.object({ name: z.string(), url: webUrl.nullable().optional(), season: z.string(), started: z.boolean(), rows: z.array(z.object({ team: z.string(), rank: z.number().nullable(), record: z.string(), points: z.string().nullable(), played: z.number() })) })),
+  })),
+});
+export type SportsData = z.infer<typeof sportsSchema>;
+export function sportsGamesForDisplay(games: SportsData["leagues"][number]["games"], limit = 6) {
+  const live = games.filter(g => g.state === "in").sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
+  const final = games.filter(g => g.completed).sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
+  const upcoming = games.filter(g => !g.completed && g.state !== "in").sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
+  const first = [...live, ...final.slice(0, upcoming.length ? 4 : limit), ...upcoming.slice(0, 2)];
+  return [...new Map([...first, ...final, ...upcoming].map(game => [game.id, game])).values()].slice(0, limit);
+}
 export const editionStorySchema = z.object({
   id: z.string(), title: z.string(), summary: z.string(),
   sector: z.string(), url: webUrl, image: webUrl.nullable(),
+  sportsGroup: sportsGroup.optional(),
   imageAsset: z.object({ src: z.string().regex(/^\/media\/[a-f0-9]{64}\.webp$/), width: z.number().int().positive(), height: z.number().int().positive(), credit: z.string(), licenseUrl: webUrl }).optional(),
   publishedAt: z.string().datetime({ offset: true }), score: z.number().min(0).max(10),
   publisher: z.string(), collectors: z.array(z.string()),
@@ -20,6 +42,7 @@ export const editionStorySchema = z.object({
 export const editionSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), generatedAt: z.string().datetime({ offset: true }),
   timezone: z.string(), windowHours: z.number(), stories: z.array(editionStorySchema),
+  sports: sportsSchema.optional(),
   editorialReviewedAt: z.string().datetime({ offset: true }).optional(),
   sources: z.array(z.object({ name: z.string(), status: z.string(), count: z.number(), latest: z.string().nullable(), reason: z.string().nullable(),
     collected: z.number().optional(), eligible: z.number().optional(), candidates: z.number().optional(), reviewed: z.number().optional(), published: z.number().optional(), checkedAt: z.string().nullable().optional() })),
@@ -66,5 +89,6 @@ export function validateBuildFreshness(edition: EditionData, now = new Date()) {
   if (!edition.stories.some(s => dateInZone(s.publishedAt, edition.timezone) === today)) throw new Error("No stories published today. Previous static HTML was not replaced.");
   if (new Set(edition.stories.map(s => s.id)).size !== edition.stories.length) throw new Error("Duplicate story identifiers");
   if (edition.stories.some(s => Date.parse(s.publishedAt) > now.getTime() + 300_000)) throw new Error("Future-dated stories in edition");
+  if (edition.sports && (dateInZone(edition.sports.checkedAt, edition.timezone) !== today || now.getTime() - Date.parse(edition.sports.checkedAt) > 24 * 3600_000 || Date.parse(edition.sports.checkedAt) > now.getTime() + 300_000)) throw new Error("Sports snapshot is stale or future-dated; refresh the sports pipeline.");
   return today;
 }
