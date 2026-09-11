@@ -12,6 +12,14 @@ Reject ads, affiliate deals, launch taglines, content farms, generic investment 
 routine stock-rating/holdings alerts and low-information aggregation. No publication
 quota. The publisher name or popularity is not a substitute for evidence.
 
+Admission is an evidence and relevance assessment, not final edition selection.
+Score substantive, relevant reporting even when it may lose space to a stronger story;
+the final desk compares all admitted candidates. Do not preselect the paper and assign
+every other readable article zero quality/importance with a generic "lower priority"
+reason. Give each held candidate a specific rationale: what evidence is missing, what
+claim is unsupported, or which earlier event/account makes it redundant. A missing
+finance or policy section must not be explained away by volume from tech sources.
+
 Quality: evidence/provenance 30%, substantive new information 25%, depth/context 20%,
 specificity 15%, transparency 10%. Importance measures actual implications for this
 reader, not how many tickers appear. Preserve attribution, caveats and the distinction

@@ -91,7 +91,24 @@ def validate_external_review(payload, request_hash, pending_packets, now):
     if reviewed.reviewedAt.tzinfo is None or not timedelta(minutes=-5) <= now - reviewed.reviewedAt <= timedelta(hours=24):
         raise ValueError("Review file must have a current timezone-aware review timestamp")
     validate_decisions(ReviewBatch(decisions=reviewed.decisions), pending_packets)
+    validate_ranking_review(reviewed.decisions, pending_packets)
     return reviewed
+
+
+def validate_ranking_review(decisions, packets):
+    """Catch bulk priority dismissals before they can bypass the final edition desk."""
+    known = {packet["id"]: packet for packet in packets}
+    blanket = Counter()
+    for decision in decisions:
+        packet = known[decision.id]
+        if (decision.decision == "hold" and decision.quality == decision.importance == 0
+                and not decision.duplicate_of and packet["wordCount"] >= 200
+                and not packet.get("truncated")
+                and re.search(r"lower incremental value|lower priority|less important|more consequential event|edition screening",
+                              decision.reason, re.I)):
+            blanket[re.sub(r"\s+", " ", decision.reason.strip().lower())] += 1
+    if any(count >= 4 for count in blanket.values()):
+        raise ValueError("Blanket ranking holds on substantive evidence require item-specific review and scoring before selection")
 
 
 def clean_text(value):
@@ -326,6 +343,7 @@ def run_editorial(repository, settings, config, review_file=None, prepare_only=F
             decisions[decision.id] = decision.model_dump()
         news = []
     batches = [news[i:i + 10] for i in range(0, len(news), 10)]
+    new_reviews = []
     if external is None:
         batches += [[p] for p in pending if p[0]["kind"] == "podcast"]
     for i, batch in enumerate(batches):
@@ -338,7 +356,10 @@ def run_editorial(repository, settings, config, review_file=None, prepare_only=F
                 decision.duplicate_of = None
             decisions[decision.id] = decision.model_dump()
             cache = next(c for p, c in batch if p["id"] == decision.id)
-            cache.write_text(ReviewBatch(decisions=[decision]).model_dump_json(indent=2))
+            new_reviews.append((cache, decision))
+    validate_ranking_review([Decision.model_validate(d) for d in decisions.values()], packets)
+    for cache, decision in new_reviews:
+        cache.write_text(ReviewBatch(decisions=[decision]).model_dump_json(indent=2))
     shortlist = [{**decisions[p["id"]], "source": p["source"], "url": p["url"], "publishedAt": p["publishedAt"]}
                  for p in packets if decisions[p["id"]]["decision"] == "admit"]
     selection_key = hashlib.sha256((json.dumps(shortlist, sort_keys=True) + selection_prompt.read_text() + history_hash(history)).encode()).hexdigest()

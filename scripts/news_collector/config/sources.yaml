@@ -38,6 +38,7 @@ trust_scores:
   npr_business: 0.9
   al_jazeera: 0.86
   krebs_security: 0.9
+  ecb_press: 0.98
 
 watchlists:
   tech_entities:
@@ -330,6 +331,15 @@ collectors:
     url: https://www.federalreserve.gov/feeds/press_all.xml
     limit: 8
     edition_sector: Economy
+  - name: ecb_press
+    type: rss
+    enabled: true
+    category: finance
+    editorial_type: announcement
+    edition_sector: Economy
+    url: https://www.ecb.europa.eu/rss/press.html
+    limit: 8
+    editorial_limit: 4
   - name: marketwatch
     type: rss
     enabled: true

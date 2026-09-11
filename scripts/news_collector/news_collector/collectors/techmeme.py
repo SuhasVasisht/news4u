@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import feedparser
 from selectolax.parser import HTMLParser
+from urllib.parse import urlparse
 
 from news_collector.collectors.base import BaseCollector
 from news_collector.models import RawItem
@@ -51,24 +52,26 @@ class TechmemeCollector(BaseCollector):
     @staticmethod
     def _extract_primary_link(description: str) -> tuple[str | None, str | None]:
         parser = HTMLParser(description)
-        links = parser.css("a")
-        article_url = None
-        publication = None
-        for link in links:
-            href = link.attributes.get("href")
-            text = link.text(strip=True)
-            if not href:
-                continue
-            if "techmeme.com/" in href:
-                continue
-            if article_url is None:
-                article_url = href
-                continue
-            if href == article_url:
-                continue
-            if text and publication is None:
-                publication = text
-                break
+        def external(link):
+            parsed = urlparse(link.attributes.get("href", ""))
+            host = (parsed.hostname or "").removeprefix("www.")
+            return parsed.scheme in {"http", "https"} and host and host != "techmeme.com" and not host.endswith(".techmeme.com")
+
+        links = [link for link in parser.css("a") if external(link)]
+        articles = [link for link in links if urlparse(link.attributes["href"]).path.strip("/")]
+        # Without a thumbnail, the publisher homepage precedes the actual headline.
+        headline = next((link for link in parser.css("span b a, b a")
+                         if external(link) and urlparse(link.attributes["href"]).path.strip("/")), None)
+        article = headline or next((link for link in articles if link.css_first("img")), None)
+        if article is None:
+            article = next(iter(articles), None)
+        article_url = article.attributes["href"] if article is not None else None
+        host = urlparse(article_url or "").hostname
+        publication = next((link.text(strip=True) for link in links
+                            if link.attributes["href"] != article_url
+                            and urlparse(link.attributes["href"]).hostname == host
+                            and not urlparse(link.attributes["href"]).path.strip("/")
+                            and link.text(strip=True)), None)
         return article_url, publication
 
     @staticmethod
