@@ -37,6 +37,10 @@ or refreshed collection timestamps. Reports on the same event are consolidated
 editorially. Repeat coverage requires a specific, evidence-backed material update.
 Older essays and podcasts retain their true publication dates and cannot be
 recycled as new daily content.
+Newsletter send times are discovery timestamps, not linked-article publication
+dates. Evidence preparation resolves the original article's publication metadata,
+rechecks its age, and holds links without a verified publisher date. Export uses
+that reviewed date and rejects older newsletter reviews lacking date verification.
 
 ## Independent review
 

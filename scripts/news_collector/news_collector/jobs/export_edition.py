@@ -144,7 +144,9 @@ def assemble_reviewed(rows, review, now, timezone_name, history=None, discoverie
         row = next((r for r in matching if not packet.get("inputHash") or source_hash(r) == packet["inputHash"]), None)
         if matching and not row:
             raise RuntimeError("Source changed since editorial review; review again before publication")
-        if not row or exclusion(row, now) or decision.decision != "admit" or key not in review.get("selection", {}).get("selected_ids", review["decisions"]):
+        if row and json.loads(row.get("raw_json") or "{}").get("_date_basis") == "newsletter_sent_at" and packet.get("publicationDateBasis") != "publisher_metadata":
+            raise RuntimeError("Newsletter-linked article requires publisher date verification; repeat editorial review")
+        if not row or exclusion({**row, "published_at": packet["publishedAt"]}, now) or decision.decision != "admit" or key not in review.get("selection", {}).get("selected_ids", review["decisions"]):
             rejected.append({"id": key, "reason": selection_reasons.get(key, decision.reason)})
             continue
         prior = prior_match(packet["url"], packet["title"], history or [], now.astimezone(ZoneInfo(timezone_name)).date().isoformat())
@@ -156,7 +158,7 @@ def assemble_reviewed(rows, review, now, timezone_name, history=None, discoverie
         stories.append({
             "id": key, "title": decision.headline, "summary": decision.summary,
             "sector": sector, "url": packet["url"], "image": public_url(row.get("image_url")),
-            "publishedAt": row["published_at"], "score": round((decision.quality * .7 + decision.importance * .3) / 10, 1),
+            "publishedAt": packet["publishedAt"], "score": round((decision.quality * .7 + decision.importance * .3) / 10, 1),
             "publisher": "Theo - t3.gg" if row["source"] == "theo_video" else publisher(packet["url"]),
             "collectors": sorted({r["source"] for r in matching} | {r["source"] for r in discoveries or [] if r["canonical_url"] == packet["url"]}),
             "coverage": [{"title": plain(row["title"], 500), "publisher": publisher(packet["url"]), "url": packet["url"]}],

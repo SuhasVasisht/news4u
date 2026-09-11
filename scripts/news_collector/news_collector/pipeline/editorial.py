@@ -148,6 +148,18 @@ def exclusion(row, now):
 
 def content_packet(row, repository, user_agent):
     raw = json.loads(row.get("raw_json") or "{}")
+    published_at = row["published_at"]
+    newsletter_date = raw.get("_date_basis") == "newsletter_sent_at"
+    if newsletter_date:
+        from news_collector.pipeline.publication_dates import article_publication_date
+        with httpx.Client(timeout=15, follow_redirects=False, headers={"User-Agent": user_agent}) as client:
+            body, _ = download(client, row["url"], 3_000_000)
+        date = article_publication_date(body.decode("utf-8", errors="replace"))
+        if not date:
+            raise ValueError("Newsletter discovery lacks a verified publisher publication date")
+        published_at = date.isoformat()
+        if exclusion({**row, "published_at": published_at}, datetime.now(timezone.utc)):
+            raise ValueError("Original article date is outside the editorial window")
     text = clean_text(row.get("text") or row.get("summary"))
     audio = audio_url(raw)
     kind = "podcast" if audio and row["source"] in LONGFORM else raw.get("_editorial_type", "reporting")
@@ -195,7 +207,8 @@ def content_packet(row, repository, user_agent):
     return {"id": hashlib.sha256(row["canonical_url"].encode()).hexdigest()[:20],
             "inputHash": source_hash(row),
             "url": row["canonical_url"], "source": row["source"], "title": row["title"],
-            "publishedAt": row["published_at"], "kind": kind, "basis": basis,
+            "publishedAt": published_at, "kind": kind, "basis": basis,
+            **({"publicationDateBasis": "publisher_metadata"} if newsletter_date else {}),
             "audio": audio, "duration": duration, "truncated": truncated, "chunks": chunks,
             "wordCount": len(words), "category": row["category"], "sector": raw.get("_edition_sector")}
 
