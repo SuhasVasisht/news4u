@@ -48,6 +48,9 @@ Discovery receives only the profile and edition cutoff, never the selected draft
 It searches and opens public sources, records queries, dated article URLs and
 findings, and produces a sampled coverage benchmark. Sources published after the
 cutoff cannot be used to manufacture a missing event. Discovery is not exhaustive.
+The final selection receives this benchmark and the complete admitted shortlist,
+so optional coverage cannot silently displace an available must-cover account.
+The checklist cannot promote a held candidate or supply facts for its summary.
 
 The final reviewer receives selected articles and full source packets, publication
 history, that checklist, and a metadata index of rejected candidates. It checks

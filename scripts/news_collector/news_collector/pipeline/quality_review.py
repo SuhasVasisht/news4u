@@ -45,7 +45,7 @@ def verify_final_audit(review, history, now=None):
     return report
 
 
-def reconsider_announcements(review, history, output):
+def reconsider_announcements(review, history, output, checklist=None):
     prompt = Path(__file__).resolve().parents[2] / "config/announcement-review-prompt.md"
     promoted = False
     for packet in review["packets"]:
@@ -66,14 +66,23 @@ def reconsider_announcements(review, history, output):
         if decision != initial:
             review["decisions"][packet["id"]] = decision
             promoted = promoted or decision["decision"] == "admit"
-    if promoted:
+    if promoted or checklist:
         shortlist = [{**review["decisions"][p["id"]], "source": p["source"], "url": p["url"], "publishedAt": p["publishedAt"]}
                      for p in review["packets"] if review["decisions"][p["id"]]["decision"] == "admit"]
         selection_prompt = prompt.with_name("edition-selection-prompt.md")
-        selection = codex_review({"shortlist": shortlist, "previouslyPublished": history}, selection_prompt, output, EditionSelection)
+        payload = {"shortlist": shortlist, "previouslyPublished": history}
+        if checklist:
+            payload["coverageChecklist"] = checklist
+        key = hashlib.sha256((json.dumps(payload, sort_keys=True) + selection_prompt.read_text()
+                              + json.dumps(reader_profile(), sort_keys=True)
+                              + os.environ.get("NEWS_EDITOR_MODEL", "default")).encode()).hexdigest()
+        cache = output / f"coverage-selection-{key}.json"
+        print("Final selection: reconciling admitted stories with independent coverage", flush=True)
+        selection = EditionSelection.model_validate_json(cache.read_text()) if cache.exists() else codex_review(payload, selection_prompt, output, EditionSelection)
         accounted = selection.selected_ids + [item.id for item in selection.excluded]
         if len(accounted) != len(set(accounted)) or set(accounted) != {p["id"] for p in shortlist} or len(selection.selected_ids) > 28:
             raise ValueError("Reconsidered selection must account for every admission once, maximum 28")
+        atomic_json(cache, selection.model_dump(mode="json"))
         review["selection"] = selection.model_dump(mode="json")
 
 
@@ -83,9 +92,9 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None):
     profile = reader_profile()
     date = cutoff.astimezone(ZoneInfo(profile["timezone"])).date().isoformat()
     history = load_history(root, date)
-    if not audit_file:
-        reconsider_announcements(review, history, output)
     checklist = discover_coverage(output / "checklist.json", cutoff, profile, checklist_file)
+    if not audit_file:
+        reconsider_announcements(review, history, output, checklist)
     request = audit_request(review, history, checklist)
     atomic_json(output / "quality-review-request.json", request)
     if audit_file:

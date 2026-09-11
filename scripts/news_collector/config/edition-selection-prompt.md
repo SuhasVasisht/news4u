@@ -50,3 +50,12 @@ not independent confirmation; distinguish proposals, allegations, rulings and co
 
 The output determines publication. Hold questionable items by excluding them with
 a clear explanation. Empty selection is better than a low-quality paper.
+
+When coverageChecklist is supplied, reconcile its independently researched events
+with the admitted shortlist. Include the strongest supported account of each
+mustCover event when one is available. A must-cover omission must not be caused by
+optional commentary or a weaker launch notice taking its space. The checklist is
+a coverage benchmark, not evidence for rewriting an article or admitting a held
+candidate. Never pretend a loosely related story covers an event it does not
+actually report. The subsequent independent factual audit still determines
+whether the chosen coverage is adequate and supported.
