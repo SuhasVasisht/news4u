@@ -25,6 +25,13 @@ bounded retry is allowed for structurally invalid reviewer output; failing a
 retry stops the build. Private raw responses are retained under
 `data/editorial/responses/` for diagnosis, not publication.
 
+Before the final audit, a bounded second pass reconsiders complete first-party
+announcements held by the initial reviewer. An authentic dated announcement can
+support an attributed action without corroborating its allegations, forecasts or
+marketing claims. The pass keeps the evidence floor, caches validated decisions,
+and repeats edition selection if it admits anything new. It does not automatically
+promote an official or corporate source, or rescue truncated evidence.
+
 The final selection compares events against published history, not simply URLs
 or refreshed collection timestamps. Reports on the same event are consolidated
 editorially. Repeat coverage requires a specific, evidence-backed material update.
