@@ -12,6 +12,8 @@ test("static edition works offline without a backend", async ({ browser }) => {
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(pathToFileURL(artifact).href);
   await expect(page.getByRole("heading", { name: "News 4 u." })).toBeVisible();
+  await expect(page.locator(".masthead-mark")).toBeVisible();
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", "/news-mark.svg");
   const count = await page.locator(".major-report,.brief").count();
   await expect(page.locator(".story-actions,.report-top,.edition-filters,.sector-index")).toHaveCount(0);
   await page.evaluate(() => {

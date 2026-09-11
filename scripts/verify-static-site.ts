@@ -24,6 +24,10 @@ export async function verifyStaticSite(base: string, root = process.cwd()) {
     page.on("console", message => { if (message.type() === "error" && /hydrat|minified react error/i.test(message.text())) errors.push(message.text()); });
     await page.goto(base);
     await expect(page.getByRole("heading", { name: "News 4 u.", exact: true })).toBeVisible();
+    await expect(page.locator(".masthead-mark")).toBeVisible();
+    const markSize = await page.locator(".masthead-mark").boundingBox();
+    if (!markSize || markSize.width < 36 || Math.abs(markSize.width - markSize.height) > 1) throw new Error("Masthead mark is not rendered at its intended size");
+    await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", "/news-mark.svg");
     await expect(page.locator(".major-report,.brief")).toHaveCount(edition.stories.length);
     await page.locator("img").evaluateAll(images => images.forEach(image => { (image as HTMLImageElement).loading = "eager"; }));
     await page.waitForFunction(() => [...document.images].every(image => image.complete));
@@ -139,7 +143,7 @@ export async function verifyStaticSite(base: string, root = process.cwd()) {
         if (!report.ok || hash(Buffer.from(await report.arrayBuffer())) !== release.files[name]) throw new Error(`Archived report changed or missing: ${name}`);
       }
     }
-    for (const name of Object.keys(release.files).filter(name => name.startsWith("media/"))) {
+    for (const name of Object.keys(release.files).filter(name => name === "news-mark.svg" || name.startsWith("media/"))) {
       const asset = await fetch(new URL(`/${name}`, base), { signal: AbortSignal.timeout(30000) });
       if (!asset.ok || hash(Buffer.from(await asset.arrayBuffer())) !== release.files[name]) throw new Error(`Media asset changed or missing: ${name}`);
     }

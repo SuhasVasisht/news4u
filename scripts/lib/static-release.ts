@@ -26,7 +26,7 @@ export function assertNewEdition(edition: EditionData, previous: EditionData) {
     }
   }
 }
-export const publicFile = (name: string) => /^(index\.html|report-[a-f0-9]{20}\.html|reader-[a-zA-Z0-9]+\.(css|js)|404\.html|_headers|edition-manifest\.json|media\/[a-f0-9]{64}\.webp|editions\/index\.html|editions\/\d{4}-\d{2}-\d{2}(-r[a-f0-9]{12})?\/(index\.html|edition\.json|report-[a-f0-9]{20}\.html))$/.test(name);
+export const publicFile = (name: string) => /^(index\.html|news-mark\.svg|report-[a-f0-9]{20}\.html|reader-[a-zA-Z0-9]+\.(css|js)|404\.html|_headers|edition-manifest\.json|media\/[a-f0-9]{64}\.webp|editions\/index\.html|editions\/\d{4}-\d{2}-\d{2}(-r[a-f0-9]{12})?\/(index\.html|edition\.json|report-[a-f0-9]{20}\.html))$/.test(name);
 
 export async function releaseFiles(directory: string, prefix = ""): Promise<string[]> {
   const files: string[] = [];
@@ -95,7 +95,7 @@ export async function prepareRelease(root: string, secrets: string[], options: {
     if (assets.generatedAt !== edition.generatedAt || !/^[a-f0-9]{64}$/.test(assets.key)) throw new Error("Reader asset manifest does not match the edition");
     key = assets.key;
   } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-  const current = ["index.html", `reader-${key}.css`, `reader-${key}.js`, ...edition.stories.map(s => `report-${s.id}.html`), ...new Set(edition.stories.flatMap(s => s.imageAsset ? [s.imageAsset.src.slice(1)] : []))];
+  const current = ["index.html", "news-mark.svg", `reader-${key}.css`, `reader-${key}.js`, ...edition.stories.map(s => `report-${s.id}.html`), ...new Set(edition.stories.flatMap(s => s.imageAsset ? [s.imageAsset.src.slice(1)] : []))];
   for (const name of current) {
     const file = path.join(root, "out", name);
     if (!(await lstat(file)).isFile()) throw new Error(`Not a regular file: ${name}`);

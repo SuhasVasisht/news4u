@@ -5,6 +5,7 @@ import { ArrowUpRight, ChevronDown, Search, X } from "lucide-react";
 import { briefingStories, sectorStories, type EditionData, type EditionStory, type EditionView } from "@/lib/edition";
 import { SportsSection } from "./sports-section";
 import { ThemePicker } from "./theme-picker";
+import { NewsMark } from "./news-mark";
 
 const discoveryNames: Record<string, string> = { tldr_tech: "TLDR Tech", tldr_ai: "TLDR AI", hackernews: "Hacker News", techmeme: "Techmeme", alphasignal: "AlphaSignal" };
 const sectors = ["Technology", "AI", "Markets", "Economy", "Deals & regulation", "World", "Policy", "Science & health", "Reading room", "Listening room", "Other", "Sports"];
@@ -65,7 +66,7 @@ export function NewsEdition({ edition, initialView = "Today", initialQuery = "",
   }
   return <main className="news-edition newspaper-reader">
     <a className="skip-link" href="#edition-content">Skip to news</a>
-    <header className="newspaper-head"><div className="masthead-main"><h1><a href={home}>News 4 u.</a></h1><div className="edition-date"><time dateTime={edition.date}>{new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(new Date(`${edition.date}T12:00:00Z`))}</time></div></div>
+    <header className="newspaper-head"><div className="masthead-main"><h1><a href={home}><NewsMark />News 4 u.</a></h1><div className="edition-date"><time dateTime={edition.date}>{new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(new Date(`${edition.date}T12:00:00Z`))}</time></div></div>
     <div className="edition-nav-row">
       <nav aria-label="Edition views"><button aria-current={!initialStory && view === "Today" ? "page" : undefined} onClick={() => changeView("Today")}>{archivedEdition ? "Edition" : "The paper"}</button><button aria-current={!initialStory && view === "I do not have time" ? "page" : undefined} onClick={() => changeView("I do not have time")}>I do not have time</button></nav>
       <div className="utility-nav">

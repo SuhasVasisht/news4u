@@ -54,15 +54,17 @@ async function main() {
       await rename("data/edition.json.tmp", "data/edition.json");
     }
     const todayStories = edition.stories.filter(s => dateInZone(s.publishedAt, edition.timezone) === today);
+    const icon = await readFile("src/app/icon.svg", "utf8");
     let css = await readFile("src/components/edition/edition.css", "utf8");
     for (const name of ["newsreader", "newsreader-500", "newsreader-600", "caslon"]) css = css.replace(`/fonts/${name}.ttf`, `data:font/ttf;base64,${(await readFile(`public/fonts/${name}.ttf`)).toString("base64")}`);
     const bundle = await build({ entryPoints: ["scripts/static-client.tsx"], bundle: true, minify: true, write: false, format: "iife", platform: "browser", jsx: "automatic", define: { "process.env.NODE_ENV": '"production"' } });
     const data = JSON.stringify(edition).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
     const body = renderToString(createElement(NewsEdition, { edition, staticMode: true }));
-    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><script>${themeBootstrap}</script><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>News 4 u - ${today}</title><style>${css}</style></head><body><div id="edition-root">${body}</div><script type="application/json" id="edition-data">${data}</script><script>${bundle.outputFiles[0].text.replace(/<\/script/gi, "<\\/script")}</script></body></html>`;
+    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><script>${themeBootstrap}</script><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>News 4 u - ${today}</title><link rel="icon" href="/news-mark.svg" type="image/svg+xml" sizes="any"><style>${css}</style></head><body><div id="edition-root">${body}</div><script type="application/json" id="edition-data">${data}</script><script>${bundle.outputFiles[0].text.replace(/<\/script/gi, "<\\/script")}</script></body></html>`;
     const warnings = edition.sources.filter(s => s.status !== "disabled" && (s.status !== "ok" || s.reason)).map(s => `${s.name}: ${s.reason || s.status}`);
     const review = { builtAt: new Date().toISOString(), editionDate: today, generatedAt: edition.generatedAt, stories: edition.stories.length, publishedToday: todayStories.length, photos: edition.stories.filter(s => s.image).length, warnings, rendering: "Server-rendered HTML with embedded React, CSS, fonts, and data. Publisher images remain remote.", state: "Browser-local. No credentials, account data, or full article bodies exported." };
     await mkdir("out", { recursive: true });
+    await writeFile("out/news-mark.svg", icon, { mode: 0o644 });
     // Reports share the edition's assets; the index remains self-contained.
     const assetKey = createHash("sha256").update(css).update(bundle.outputFiles[0].text).digest("hex");
     await writeFile(`out/reader-${assetKey}.css`, css, { mode: 0o644 });
@@ -70,7 +72,7 @@ async function main() {
     for (const story of edition.stories) {
       const reportBody = renderToString(createElement(NewsEdition, { edition, staticMode: true, initialStory: story.id }));
       const escaped = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
-      const report = `<!doctype html><html lang="en"><head><meta charset="utf-8"><script>${themeBootstrap}</script><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escaped(story.title)} | News 4 u</title><link rel="stylesheet" href="./reader-${assetKey}.css"></head><body><div id="edition-root" data-story="${escaped(story.id)}">${reportBody}</div><script type="application/json" id="edition-data">${data}</script><script src="./reader-${assetKey}.js"></script></body></html>`;
+      const report = `<!doctype html><html lang="en"><head><meta charset="utf-8"><script>${themeBootstrap}</script><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escaped(story.title)} | News 4 u</title><link rel="icon" href="/news-mark.svg" type="image/svg+xml" sizes="any"><link rel="stylesheet" href="./reader-${assetKey}.css"></head><body><div id="edition-root" data-story="${escaped(story.id)}">${reportBody}</div><script type="application/json" id="edition-data">${data}</script><script src="./reader-${assetKey}.js"></script></body></html>`;
       const reportPath = `out/report-${encodeURIComponent(story.id)}.html`;
       await writeFile(`${reportPath}.tmp`, report, { mode: 0o644 });
       await rename(`${reportPath}.tmp`, reportPath);

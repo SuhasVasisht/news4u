@@ -45,6 +45,8 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{ou
 .news-edition h1,.news-edition h2,.news-edition h3,.news-edition h4,.news-edition p{margin:0}
 .masthead-main{display:flex;justify-content:space-between;align-items:end;gap:25px;padding:17px 0 22px;border-block:1px solid var(--ink)}
 .masthead-main h1{font:500 61px/1.2 var(--serif)}
+.masthead-main h1 a{display:inline-flex;align-items:center;gap:.2em}
+.news-edition .masthead-mark{width:.76em;height:.76em;overflow:visible;flex:none}
 .edition-date{font:9px/1.8 var(--mono);text-transform:uppercase;text-align:right;padding-bottom:5px}
 .edition-date span{display:block}
 .edition-nav-row{display:flex;justify-content:space-between;gap:20px;border-bottom:1px solid var(--line);min-height:43px}

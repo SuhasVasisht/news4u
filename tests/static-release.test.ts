@@ -8,7 +8,7 @@ import { dateInZone } from "../src/lib/edition";
 
 describe("Cloudflare static release", () => {
   it("allows reader artifacts only, never runtime files, screenshots, or functions", () => {
-    for (const name of ["index.html", "404.html", "_headers", "report-0123456789abcdefabcd.html", "reader-20260908T120000Z.js", "editions/2026-09-08/edition.json", "editions/index.html", `media/${"a".repeat(64)}.webp`]) expect(publicFile(name)).toBe(true);
+    for (const name of ["index.html", "news-mark.svg", "404.html", "_headers", "report-0123456789abcdefabcd.html", "reader-20260908T120000Z.js", "editions/2026-09-08/edition.json", "editions/index.html", `media/${"a".repeat(64)}.webp`]) expect(publicFile(name)).toBe(true);
     for (const name of [".env", "qa.png", "_worker.js", "functions/index.js", "../index.html", "edition-audit.json", "news_collector.db", "editions/../index.html", "media/x.svg", "editions/2026-09-08/.env"]) expect(publicFile(name)).toBe(false);
   });
 
@@ -30,6 +30,7 @@ describe("Cloudflare static release", () => {
       const key = now.replace(/[^a-zA-Z0-9]/g, "");
       await writeFile(path.join(root, "out", `reader-${key}.css`), "body{color:black}");
       await writeFile(path.join(root, "out", `reader-${key}.js`), "void 0;");
+      await writeFile(path.join(root, "out/news-mark.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"/>");
       await writeFile(path.join(root, "out/qa.png"), "not public");
       async function snapshot() {
         await writeFile(path.join(root, "data/edition.json"), JSON.stringify(edition));
