@@ -163,10 +163,14 @@ def prepare_sports(settings, repository, now, zone):
                     candidates.append((date, title, url, e))
                 eligible = len(candidates)
                 for date, title, url, e in sorted(candidates, key=lambda c: c[0], reverse=True)[:8]:
+                    if url in seen:
+                        continue
                     seen.add(url)
                     row = {"canonical_url": url, "url": url, "title": title, "published_at": date.isoformat(),
                            "source": feed["name"], "category": "other", "text": clean_text(e.get("summary", "")), "raw_json": "{}"}
                     packet = content_packet(row, repository, settings.user_agent)
+                    if packet["id"] in {p["id"] for p in packets}:
+                        continue
                     packet["sportsGroup"] = feed["group"]
                     packets.append(packet)
             except Exception as exc:

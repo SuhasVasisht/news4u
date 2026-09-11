@@ -5,6 +5,7 @@ description = "Daily news ingestion pipeline with collectors, normalization, ran
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+  "pypdf>=6.0.0,<7",
   "pillow>=11.0.0",
   "faster-whisper>=1.2.0",
   "youtube-transcript-api>=1.2.0",

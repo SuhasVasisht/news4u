@@ -19,8 +19,11 @@ def load_history(root, edition_date):
         if edition.get("date") != path.parent.name[:10] or not edition.get("editorialReviewedAt"):
             raise ValueError("Invalid published history; cannot establish novelty")
         for story in edition["stories"]:
-            history.append({"date": edition["date"], "id": story["id"], "title": story["title"],
-                            "url": story["url"], "coverage": story.get("coverage", [])})
+            entry = {"date": edition["date"], "id": story["id"], "title": story["title"],
+                     "url": story["url"], "coverage": story.get("coverage", [])}
+            if story.get("eventKey"):
+                entry["eventKey"] = story["eventKey"]
+            history.append(entry)
     return history
 
 

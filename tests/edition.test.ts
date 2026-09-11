@@ -3,6 +3,11 @@ import { briefingStories, dateInZone, editionStorySchema, parseReaderState, sect
 
 const story: EditionStory = { id: "a", title: "Report", summary: "Summary", sector: "Technology", url: "https://example.com/a", image: null, publishedAt: "2026-09-08T07:30:00Z", score: 8, publisher: "Example", collectors: ["rss"], coverage: [] };
 describe("shared edition", () => {
+  it("retains audited event identity without requiring it in older editions", () => {
+    expect(editionStorySchema.parse({ ...story, eventKey: "senate-ai-inquiry" }).eventKey).toBe("senate-ai-inquiry");
+    expect(editionStorySchema.parse(story).eventKey).toBeUndefined();
+    expect(editionStorySchema.safeParse({ ...story, eventKey: "Not a stable key" }).success).toBe(false);
+  });
   it("preserves desk ordering and uses importance for the condensed paper", () => {
     const items = [{ ...story, id: "deep-read", score: 9.5, importance: 65, editorialRank: 1 },
       { ...story, id: "breaking", score: 8, importance: 98, editorialRank: 0 }];

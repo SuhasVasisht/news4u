@@ -39,6 +39,8 @@ trust_scores:
   al_jazeera: 0.86
   krebs_security: 0.9
   ecb_press: 0.98
+  dol_claims: 0.98
+  hawley_oversight: 0.75
 
 watchlists:
   tech_entities:
@@ -61,6 +63,33 @@ watchlists:
     - AMD
 
 collectors:
+  - name: salesforce_news
+    type: rss
+    enabled: true
+    category: tech
+    edition_sector: Deals & regulation
+    editorial_type: announcement
+    url: https://www.salesforce.com/news/feed/
+    limit: 4
+    editorial_limit: 2
+  - name: dol_claims
+    type: dol_claims
+    enabled: true
+    category: finance
+    edition_sector: Economy
+    editorial_type: announcement
+    url: https://www.dol.gov/ui/data.pdf
+    editorial_limit: 1
+  - name: hawley_oversight
+    type: rss
+    enabled: true
+    category: politics
+    edition_sector: Deals & regulation
+    # Statements from one senator's office, not independent confirmation of allegations.
+    editorial_type: announcement
+    url: https://www.hawley.senate.gov/feed/
+    limit: 4
+    editorial_limit: 2
   - name: techcrunch
     type: rss
     enabled: true

@@ -4,12 +4,28 @@ import os
 from datetime import datetime, timezone
 
 from news_collector.runtime import build_runtime
-from news_collector.pipeline.editorial import codex_review, ReviewBatch
-from news_collector.pipeline.sports import prepare_sports, publish_sports, write_json, config_for
+from news_collector.pipeline.editorial import codex_review, ReviewBatch, validate_decisions, reader_profile
+from news_collector.pipeline.sports import prepare_sports, publish_sports, write_json, config_for, fingerprint
 
 
 class SportsReview(ReviewBatch):
     pass
+
+
+def review_candidates(request, prompt, output):
+    decisions = []
+    for group in dict.fromkeys(p["sportsGroup"] for p in request["packets"]):
+        packets = [p for p in request["packets"] if p["sportsGroup"] == group]
+        payload = {"packets": packets, "previouslyPublished": request["previouslyPublished"]}
+        key = fingerprint({"input": payload, "prompt": prompt.read_text(), "profile": reader_profile(),
+                           "model": os.environ.get("NEWS_EDITOR_MODEL", "default")})
+        cache = output / f"review-{key}.json"
+        print(f"Sports review: {group}, {len(packets)} candidates", flush=True)
+        result = SportsReview.model_validate_json(cache.read_text()) if cache.exists() else codex_review(payload, prompt, output, SportsReview)
+        validate_decisions(result, packets)
+        write_json(cache, result.model_dump(mode="json"))
+        decisions.extend(result.decisions)
+    return SportsReview(decisions=decisions)
 
 
 def main():
@@ -31,9 +47,10 @@ def main():
         if args.prepare_review:
             print(json.dumps({"request": str(output / "review-request.json"), "candidates": len(request["packets"]), "sources": request["sources"]}, indent=2))
             return
-        result = codex_review({"packets": request["packets"], "previouslyPublished": request["previouslyPublished"]}, settings.project_root / "config/sports-prompt.md", output, SportsReview)
+        result = review_candidates(request, settings.project_root / "config/sports-prompt.md", output)
         review = {"requestHash": request["requestHash"], "reviewer": "Sports editorial desk", "reviewedAt": datetime.now(timezone.utc).isoformat(),
                   "decisions": [d.model_dump() for d in result.decisions], "selection": {"selected_ids": [d.id for d in sorted(result.decisions, key=lambda d: (-d.importance, -d.quality)) if d.decision == "admit"], "excluded": []}}
+    write_json(output / "review-response.json", review)
     snapshot = publish_sports(request, review, settings, repository, datetime.now(timezone.utc), zone)
     write_json(output / "latest.json", snapshot)
     print(json.dumps({"stories": len(snapshot["stories"]), "checkedAt": snapshot["sports"]["checkedAt"], "output": str(output / "latest.json")}))

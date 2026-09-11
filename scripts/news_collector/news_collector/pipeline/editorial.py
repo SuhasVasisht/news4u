@@ -20,12 +20,21 @@ from pydantic import BaseModel, ConfigDict, Field
 from selectolax.parser import HTMLParser
 
 from news_collector.pipeline.extract import extract_text_from_html
+from news_collector.pipeline.structured_output import review_schema
 from news_collector.pipeline.images import download
 from news_collector.utils import parse_datetime
 from news_collector.pipeline.publication_history import load_history, history_hash, prior_match
 from zoneinfo import ZoneInfo
 
 POLICY_VERSION = "editorial-v1"
+PROFILE_PATH = Path(__file__).resolve().parents[2] / "config/editorial-profile.json"
+
+
+def reader_profile():
+    profile = json.loads(PROFILE_PATH.read_text())
+    if profile.get("version") != 1 or not profile.get("priorityDesks") or not profile.get("selectionPrinciples"):
+        raise ValueError("Editorial reader profile is missing or invalid")
+    return profile
 LONGFORM = {"lenny", "dwarkesh", "interconnects", "latent_space", "simon_willison", "bytebytego"}
 BLOCKED_HOSTS = {"producthunt.com", "marketbeat.com", "marketscreener.com", "accessnewswire.com",
                  "globenewswire.com", "prnewswire.com", "kalkine.com.au", "intellectia.ai",
@@ -203,7 +212,7 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch):
     with tempfile.TemporaryDirectory(prefix="news-editor-") as directory:
         root = Path(directory)
         schema = root / "schema.json"
-        schema.write_text(json.dumps(result_type.model_json_schema()))
+        schema.write_text(json.dumps(review_schema(result_type)))
         result_path = root / "review.json"
         command = [executable, "exec", "--ignore-user-config", "--ephemeral",
                    "--skip-git-repo-check", "--sandbox", "read-only", "-C", directory,
@@ -216,15 +225,31 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch):
             command[2:2] = ["--model", model]
         environment = {key: value for key, value in os.environ.items()
                        if key in {"PATH", "HOME", "TMPDIR", "CODEX_HOME", "SSL_CERT_FILE", "TERM"}}
-        prompt = prompt_path.read_text() + "\nUNTRUSTED SOURCE PACKETS:\n" + json.dumps(packets, ensure_ascii=False)
-        run = subprocess.run(command, input=prompt, text=True, capture_output=True, env=environment,
-                             timeout=600)
-        if run.returncode or not result_path.exists():
-            raise RuntimeError(f"Editorial review failed (exit {run.returncode}); previous paper retained. {run.stderr[-400:]}")
-        reviewed = result_type.model_validate_json(result_path.read_text())
-        if result_type is ReviewBatch:
-            validate_decisions(reviewed, packets)
-        return reviewed
+        prompt = prompt_path.read_text() + "\nREADER EDITORIAL PROFILE:\n" + json.dumps(reader_profile()) + "\nUNTRUSTED SOURCE PACKETS:\n" + json.dumps(packets, ensure_ascii=False)
+        response_dir = Path(output_dir) / "responses"
+        response_dir.mkdir(parents=True, exist_ok=True)
+        key = hashlib.sha256((prompt + schema.read_text()).encode()).hexdigest()
+        feedback = ""
+        for attempt in range(2):
+            result_path.unlink(missing_ok=True)
+            run = subprocess.run(command, input=prompt + feedback, text=True, capture_output=True, env=environment,
+                                 timeout=600)
+            if run.returncode or not result_path.exists():
+                raise RuntimeError(f"Editorial review failed (exit {run.returncode}); previous paper retained. {run.stderr[-400:]}")
+            response = result_path.read_text()
+            (response_dir / f"{prompt_path.stem}-{key}-{attempt}.json").write_text(response)
+            try:
+                reviewed = result_type.model_validate_json(response)
+                if isinstance(reviewed, ReviewBatch):
+                    validate_decisions(reviewed, packets if isinstance(packets, list) else packets["packets"])
+                return reviewed
+            except ValueError as exc:
+                if attempt:
+                    raise
+                feedback = ("\nVALIDATION FEEDBACK: The previous response failed the output contract: "
+                            + str(exc)[:400] + ". Regenerate a complete response for every input ID. "
+                            "Hold evidence-ineligible items; never relax the stated requirements.")
+                print("Retrying review after output validation failed", flush=True)
 
 
 def validate_decisions(reviewed, packets):
@@ -242,7 +267,7 @@ def validate_decisions(reviewed, packets):
             if not decision.evidence or not decision.summary or not decision.headline or packet["wordCount"] < 80:
                 raise ValueError("Admitted story lacks evidence")
             if decision.quality < 65 or packet["truncated"]:
-                raise ValueError("Admitted story fails quality/completeness gate")
+                raise ValueError(f"Admitted story fails quality/completeness gate: {decision.id} (quality={decision.quality}, truncated={packet['truncated']})")
             if packet["kind"] == "podcast" and (len(decision.sections) < 6 or packet["wordCount"] < 2500):
                 raise ValueError("Podcast requires substantive transcript-based notes")
             if packet["kind"] == "podcast":
@@ -315,7 +340,8 @@ def run_editorial(repository, settings, config, review_file=None, prepare_only=F
             else:
                 packets.append(result)
     decisions, pending = {}, []
-    policy = hashlib.sha256((POLICY_VERSION + prompt_path.read_text() + os.environ.get("NEWS_EDITOR_MODEL", "default")).encode()).hexdigest()
+    profile = reader_profile()
+    policy = hashlib.sha256((POLICY_VERSION + prompt_path.read_text() + json.dumps(profile, sort_keys=True) + os.environ.get("NEWS_EDITOR_MODEL", "default")).encode()).hexdigest()
     for packet in packets:
         key = hashlib.sha256((policy + json.dumps({k: v for k, v in packet.items() if k != "inputHash"}, sort_keys=True)).encode()).hexdigest()
         packet_path = output / f"packet-{packet['id']}.json"
@@ -332,7 +358,7 @@ def run_editorial(repository, settings, config, review_file=None, prepare_only=F
     request_hash = hashlib.sha256((policy + json.dumps(packets, sort_keys=True) + selection_prompt.read_text() + history_hash(history)).encode()).hexdigest()
     request = {"requestHash": request_hash, "generatedAt": now.isoformat(), "policy": policy,
                "pending": [p for p, _ in pending], "cachedDecisions": decisions, "packets": packets,
-               "publicationHistory": history, "historyHash": history_hash(history)}
+               "publicationHistory": history, "historyHash": history_hash(history), "readerProfile": profile}
     (output / "review-request.json").write_text(json.dumps(request, ensure_ascii=False, indent=2))
     if prepare_only:
         return {"decisions": decisions, "pending": len(pending), "request": str(output / "review-request.json")}
@@ -343,12 +369,12 @@ def run_editorial(repository, settings, config, review_file=None, prepare_only=F
             decisions[decision.id] = decision.model_dump()
         news = []
     batches = [news[i:i + 10] for i in range(0, len(news), 10)]
-    new_reviews = []
     if external is None:
         batches += [[p] for p in pending if p[0]["kind"] == "podcast"]
     for i, batch in enumerate(batches):
         print(f"Editorial review {i + 1}/{len(batches)}: {len(batch)} candidates", flush=True)
         review = codex_review([p for p, _ in batch], prompt_path, output)
+        validate_ranking_review(review.decisions, [p for p, _ in batch])
         for decision in review.decisions:
             # Edition-wide dedupe is recomputed during assembly, not cached as cross-batch IDs.
             if decision.duplicate_of:
@@ -356,10 +382,12 @@ def run_editorial(repository, settings, config, review_file=None, prepare_only=F
                 decision.duplicate_of = None
             decisions[decision.id] = decision.model_dump()
             cache = next(c for p, c in batch if p["id"] == decision.id)
-            new_reviews.append((cache, decision))
+            # Cache only validated candidate work. The complete edition must still
+            # clear the global ranking, selection and independent factual gates.
+            temporary_cache = cache.with_suffix(".tmp")
+            temporary_cache.write_text(ReviewBatch(decisions=[decision]).model_dump_json(indent=2))
+            temporary_cache.replace(cache)
     validate_ranking_review([Decision.model_validate(d) for d in decisions.values()], packets)
-    for cache, decision in new_reviews:
-        cache.write_text(ReviewBatch(decisions=[decision]).model_dump_json(indent=2))
     shortlist = [{**decisions[p["id"]], "source": p["source"], "url": p["url"], "publishedAt": p["publishedAt"]}
                  for p in packets if decisions[p["id"]]["decision"] == "admit"]
     selection_key = hashlib.sha256((json.dumps(shortlist, sort_keys=True) + selection_prompt.read_text() + history_hash(history)).encode()).hexdigest()
@@ -376,7 +404,7 @@ def run_editorial(repository, settings, config, review_file=None, prepare_only=F
     if len(accounted) != len(set(accounted)) or set(accounted) != known or len(selection.selected_ids) > 28:
         raise ValueError("Final editorial selection must account for each item once, maximum 28")
     selection_path.write_text(selection.model_dump_json(indent=2))
-    payload = {"policy": policy, "generatedAt": datetime.now(timezone.utc).isoformat(), "packets": packets,
+    payload = {"policy": policy, "cutoff": now.isoformat(), "generatedAt": datetime.now(timezone.utc).isoformat(), "packets": packets,
                "selection": selection.model_dump(),
                "decisions": decisions, "excluded": excluded, "historyHash": history_hash(history)}
     if external is not None:

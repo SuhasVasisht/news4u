@@ -22,3 +22,11 @@ def test_rediscovery_and_reworded_headlines_do_not_create_new_stories():
 def test_periodic_reports_with_different_numbers_are_not_fuzzy_duplicates():
     history = [{"date": "2026-09-08", "id": "old", "url": "https://example.com/old", "title": "US weekly unemployment claims rise to 210000 in latest report", "coverage": []}]
     assert prior_match("https://example.com/new", "US weekly unemployment claims rise to 230000 in latest report", history, "2026-09-09") is None
+
+
+def test_history_retains_audited_event_identity(tmp_path):
+    root = tmp_path / "data/cloudflare-published/editions/2026-09-09"
+    root.mkdir(parents=True)
+    (root / "edition.json").write_text(json.dumps({"date": "2026-09-09", "editorialReviewedAt": "reviewed",
+        "stories": [{"id": "story", "title": "Report", "url": "https://example.org/report", "eventKey": "bank-rate-decision"}]}))
+    assert load_history(tmp_path, "2026-09-10")[0]["eventKey"] == "bank-rate-decision"

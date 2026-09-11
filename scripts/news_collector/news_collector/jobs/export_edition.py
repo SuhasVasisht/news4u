@@ -48,7 +48,9 @@ def publisher(url: str) -> str:
             "justice.gov": "US Department of Justice", "aljazeera.com": "Al Jazeera",
             "npr.org": "NPR", "krebsonsecurity.com": "Krebs on Security",
             "spectrum.ieee.org": "IEEE Spectrum", "macrumors.com": "MacRumors",
-            "alphasignal.ai": "AlphaSignal", "blog.bytebytego.com": "ByteByteGo"}.get(host, host)
+            "alphasignal.ai": "AlphaSignal", "blog.bytebytego.com": "ByteByteGo",
+            "dol.gov": "US Department of Labor", "ecb.europa.eu": "European Central Bank",
+            "salesforce.com": "Salesforce", "hawley.senate.gov": "Senator Hawley's office"}.get(host, host)
 
 
 def build_snapshot(rows: list[dict], now: datetime, timezone_name: str = "America/Los_Angeles") -> tuple[dict, dict]:
@@ -118,7 +120,7 @@ def build_snapshot(rows: list[dict], now: datetime, timezone_name: str = "Americ
     return snapshot, audit
 
 
-def assemble_reviewed(rows, review, now, timezone_name, history=None, discoveries=None):
+def assemble_reviewed(rows, review, now, timezone_name, history=None, discoveries=None, audited_selection=False):
     from news_collector.pipeline.publication_history import prior_match, history_hash
     if history is not None and review.get("historyHash") != history_hash(history):
         raise RuntimeError("Publication history changed; repeat editorial review")
@@ -171,8 +173,11 @@ def assemble_reviewed(rows, review, now, timezone_name, history=None, discoverie
     selected, counts = [], Counter()
     for story in stories:
         if counts[story["publisher"]] >= 4 or len(selected) >= 28:
+            if audited_selection:
+                raise RuntimeError("Audited selection exceeds edition or publisher limits; repeat final selection")
             continue
-        duplicate = next((s for s in selected if fuzz.token_set_ratio(s["title"], story["title"]) >= 85), None)
+        # A verified event-level desk decision must not be silently rewritten by title similarity.
+        duplicate = None if audited_selection else next((s for s in selected if fuzz.token_set_ratio(s["title"], story["title"]) >= 85), None)
         if duplicate:
             duplicate["coverage"].extend(story["coverage"])
             continue
@@ -229,7 +234,16 @@ def main() -> None:
     history = load_history(settings.project_root.parent.parent, now.astimezone(ZoneInfo(zone)).date().isoformat())
     enabled = {s["name"] for s in config["collectors"] if s.get("enabled", True)}
     discoveries = repository.source_discoveries()
-    snapshot, audit = assemble_reviewed(rows, review, now, zone, history, [r for r in discoveries if r["source"] in enabled])
+    from news_collector.pipeline.quality_review import verify_final_audit
+    final_audit = verify_final_audit(review, history, now)
+    snapshot, audit = assemble_reviewed(rows, review, now, zone, history,
+                                       [r for r in discoveries if r["source"] in enabled], audited_selection=True)
+    if [s["id"] for s in snapshot["stories"]] != review["selection"]["selected_ids"]:
+        raise RuntimeError("Export changed the audited selection; resolve duplicate/publisher limits at the final desk")
+    event_keys = {story.id: story.event_key for story in final_audit.review.stories}
+    for story in snapshot["stories"]:
+        story["eventKey"] = event_keys[story["id"]]
+    audit["final_quality_review"] = final_audit.model_dump(mode="json")
     audit["publication_history"] = {"prior_stories": len(history), "repeats_in_edition": 0,
                                     "blocked_candidates": sum(e["reason"] == "previously_published" for e in review["excluded"])}
     audit["image_quality"] = verify_snapshot_images(snapshot, repository)

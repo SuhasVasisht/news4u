@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "timezone": "America/Los_Angeles",
+  "purpose": "One daily newspaper, not a stream of links or a popularity contest",
+  "priorityDesks": ["Technology", "AI", "Markets", "Economy", "Deals & regulation"],
+  "essentialDesks": ["World", "Policy", "Science & health"],
+  "followedVoices": ["Lenny", "Dwarkesh", "Theo", "ByteByteGo"],
+  "discoveryNewsletters": ["TLDR", "AlphaSignal"],
+  "selectionPrinciples": [
+    "Keep evidence quality separate from importance. Quality is a hard floor, not a proxy for reader relevance.",
+    "Importance combines consequences, genuinely new information, personal relevance and timeliness; explain these rather than treating a numeric score as objective truth.",
+    "Prioritize consequential AI and software developments, useful practitioner insights, markets, macroeconomics, completed or proposed deals and regulation.",
+    "Major world events, governance changes and public-health developments must not be crowded out by high-volume technology sources.",
+    "Prefer one strongest account per event. Additional reports must contribute distinct evidence; an update must state what materially changed.",
+    "An older high-value analysis or complete podcast can qualify if not previously published; preserve its real date and do not portray it as breaking news.",
+    "Keep sports concise: major developments, results and standings rather than routine speculation.",
+    "Do not fill sectors or publisher quotas with weak stories, product advertising, stock tips or routine announcements.",
+    "Do not infer the reader's political preferences or optimize for agreement, outrage or engagement.",
+    "Use an independent prepublication event checklist and expose unresolved access and coverage gaps in the private audit. Never invent evidence to fill a gap."
+  ]
+}

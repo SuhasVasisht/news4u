@@ -7,12 +7,16 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--prepare-review", action="store_true")
     parser.add_argument("--review-file")
+    parser.add_argument("--checklist-file")
     args = parser.parse_args()
     settings, config, repository, _ = build_runtime()
     result = run_editorial(repository, settings, config, review_file=args.review_file, prepare_only=args.prepare_review)
     if args.prepare_review:
         print({"request": result["request"], "pending": result["pending"], "cached": len(result["decisions"])})
         return
+    from news_collector.pipeline.quality_review import run_quality_review
+    audit = run_quality_review(settings.project_root.parent.parent, result, args.checklist_file)
+    print({"final_audit": audit.status, "metrics": audit.metrics})
     print({"reviewed": len(result["decisions"]), "admitted": sum(d["decision"] == "admit" for d in result["decisions"].values())})
 
 

@@ -24,6 +24,7 @@ export function sportsGamesForDisplay(games: SportsData["leagues"][number]["game
 }
 export const editionStorySchema = z.object({
   id: z.string(), title: z.string(), summary: z.string(),
+  eventKey: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).optional(),
   sector: z.string(), url: webUrl, image: webUrl.nullable(),
   sportsGroup: sportsGroup.optional(),
   imageAsset: z.object({ src: z.string().regex(/^\/media\/[a-f0-9]{64}\.webp$/), width: z.number().int().positive(), height: z.number().int().positive(), credit: z.string(), licenseUrl: webUrl }).optional(),

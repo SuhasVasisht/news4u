@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import feedparser
+import time
 from urllib.parse import urlparse
 
 from news_collector.collectors.base import BaseCollector
@@ -11,6 +12,19 @@ from news_collector.utils import entity_candidates, parse_datetime, ticker_candi
 
 class RSSCollector(BaseCollector):
     source_type = "rss"
+
+    def _feed_response(self):
+        url = self.context.config["url"]
+        parsed = urlparse(url)
+        youtube = parsed.hostname in {"youtube.com", "www.youtube.com"} and parsed.path == "/feeds/videos.xml"
+        # Public YouTube feeds intermittently return 404/5xx for valid channel IDs.
+        # Bound retries, retain normal identity, and report persistent failures honestly.
+        for attempt in range(3 if youtube else 1):
+            response = self.client.get(url)
+            if not youtube or response.status_code not in {404, 500, 502, 503, 504} or attempt == 2:
+                response.raise_for_status()
+                return response
+            time.sleep(2 * (attempt + 1))
 
     def _fallback_arxiv_items(self) -> list[RawItem]:
         parsed_url = urlparse(self.context.config["url"])
@@ -53,8 +67,7 @@ class RSSCollector(BaseCollector):
         return items
 
     def collect(self) -> list[RawItem]:
-        response = self.client.get(self.context.config["url"])
-        response.raise_for_status()
+        response = self._feed_response()
         parsed = feedparser.parse(response.content)
         if not parsed.entries and "arxiv.org/rss/" in self.context.config["url"]:
             return self._fallback_arxiv_items()
