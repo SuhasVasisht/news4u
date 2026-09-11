@@ -17,7 +17,7 @@ def fixture():
     checklist = {"checkedAt": NOW.isoformat(), "method": "independent_web_research",
                  "researcher": "separate desk", "scope": ["Economy"], "queries": ["central bank decision today"],
                  "events": [{"id": "rates", "event": "Bank cuts rates today", "sector": "Economy", "mustCover": True,
-                             "sources": [{"url": "https://example.org/decision", "publishedAt": NOW.isoformat(),
+                             "sources": [{"url": "https://central-bank.gov/decision", "publishedAt": NOW.isoformat(),
                                           "finding": "The bank announced a rate cut today."}]}]}
     request = build_audit_request(packets, decisions, {"selected_ids": ["a"]}, [], checklist, NOW)
     claims = [{"passage": text, "verdict": "supported", "critical": True, "evidence": ["p1"],
@@ -147,6 +147,28 @@ def test_must_cover_cannot_be_dismissed_as_out_of_scope():
     request, payload = fixture()
     payload["review"]["coverage"][0].update(status="not_applicable", story_ids=[], cause="out_of_scope")
     assert validate_audit(payload, request, NOW).status == "blocked"
+
+
+def test_single_secondary_source_cannot_make_event_must_cover():
+    request, payload = fixture()
+    request["checklist"]["events"][0]["sources"][0]["url"] = "https://example.org/report"
+    request = rebind(request, payload)
+    payload["review"]["coverage"][0].update(status="missing", story_ids=[], cause="selection")
+    report = validate_audit(payload, request, NOW)
+    assert report.status == "passed"
+    assert report.metrics["mustCoverEvents"] == 0
+
+
+def test_previously_published_event_satisfies_no_repeat_policy():
+    request, payload = fixture()
+    request["history"] = [{"id": "old", "eventKey": "bank-rate-decision"}]
+    request = rebind(request, payload)
+    payload["review"]["stories"][0].update(priorStoryIds=["old"],
+        materialUpdate="The selected report adds a separately verified current development.",
+        materialUpdateEvidence=["p1"])
+    payload["review"]["coverage"][0].update(status="not_applicable", story_ids=[],
+        cause="previously_published", prior_story_ids=["old"])
+    assert validate_audit(payload, request, NOW).status == "passed"
 
 
 def test_prior_coverage_requires_material_change_and_evidence():

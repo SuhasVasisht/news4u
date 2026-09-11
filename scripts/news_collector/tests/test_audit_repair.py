@@ -45,7 +45,8 @@ def test_only_optional_unmapped_story_holds_can_be_pruned():
     checklist = request["checklist"]
     assert prunable_optional_ids(report, checklist) == ["a"]
     checklist["events"][0]["mustCover"] = True
-    assert prunable_optional_ids(report, checklist) == []
+    # An unrelated missing must-cover event is not worsened by removing held copy.
+    assert prunable_optional_ids(report, checklist) == ["a"]
     checklist["events"][0]["mustCover"] = False
     report.review.coverage[0].story_ids = ["a"]
     report.review.coverage[0].status = "covered"

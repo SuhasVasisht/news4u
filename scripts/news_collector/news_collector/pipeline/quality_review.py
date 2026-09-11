@@ -7,7 +7,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from news_collector.pipeline.coverage_discovery import discover_coverage
-from news_collector.pipeline.edition_audit import AuditReview, build_audit_request, validate_audit, require_publishable
+from news_collector.pipeline.edition_audit import (AuditReview, CoverageAuditReview,
+    StoryAuditReview, build_audit_request, validate_audit, require_publishable)
 from news_collector.pipeline.editorial import codex_review, reader_profile, ReviewBatch, EditionSelection, validate_decisions
 from news_collector.pipeline.publication_history import load_history, history_hash
 from news_collector.pipeline.audit_repair import repairable_ids, reusable_story_checks, prunable_optional_ids, ProseCorrections, apply_corrections
@@ -34,6 +35,72 @@ def atomic_json(path, value):
     temporary = path.with_name(path.name + ".tmp")
     temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2))
     temporary.replace(path)
+
+
+def normalize_batch_ids(stories, expected):
+    """Repair only an unambiguous one-character transcription of an opaque ID."""
+    if len(stories) != len(expected) or len({story.id for story in stories}) != len(stories):
+        raise ValueError("Final audit story batch must check every requested ID exactly once")
+    known = set(expected)
+    for story, wanted in zip(stories, expected):
+        if story.id == wanted:
+            continue
+        differences = sum(left != right for left, right in zip(story.id, wanted))
+        if story.id in known or len(story.id) != len(wanted) or differences != 1:
+            raise ValueError("Final audit story batch changed or reordered a requested ID")
+        story.id = wanted
+    if [story.id for story in stories] != expected:
+        raise ValueError("Final audit story batch must preserve requested ID order")
+
+
+def run_batched_audit(request, prompt, output, reused, batch_size=5):
+    """Audit evidence in bounded calls, then reconcile coverage independently."""
+    reused_ids = {story.id for story in reused}
+    pending = [key for key in request["selection"]["selected_ids"] if key not in reused_ids]
+    packets = {packet["id"]: packet for packet in request["packets"]}
+    decisions = {decision["id"]: decision for decision in request["decisions"]}
+    story_reviews = []
+    for offset in range(0, len(pending), batch_size):
+        ids = pending[offset:offset + batch_size]
+        payload = {
+            "auditMode": "story_claims",
+            "policy": request["policy"],
+            "cutoff": request["cutoff"],
+            "auditStoryIds": ids,
+            "packets": [packets[key] for key in ids],
+            "decisions": [decisions[key] for key in ids],
+            "history": request["history"],
+            "selectedStoryIndex": [
+                {"id": key, "headline": decisions[key]["headline"]}
+                for key in request["selection"]["selected_ids"]
+            ],
+        }
+        number = offset // batch_size + 1
+        total = (len(pending) + batch_size - 1) // batch_size
+        print(f"Final factual audit: story batch {number}/{total} ({len(ids)} stories)", flush=True)
+        result = codex_review(payload, prompt, output, StoryAuditReview, allow_web=True)
+        normalize_batch_ids(result.stories, ids)
+        story_reviews.extend(result.stories)
+
+    all_story_reviews = [*story_reviews, *reused]
+    coverage_payload = {
+        "auditMode": "coverage_reconciliation",
+        "policy": request["policy"],
+        "cutoff": request["cutoff"],
+        "selection": request["selection"],
+        "selectedStories": [
+            {"id": key, "headline": decisions[key]["headline"],
+             "summary": decisions[key]["summary"], "event_key": next(
+                 story.event_key for story in all_story_reviews if story.id == key)}
+            for key in request["selection"]["selected_ids"]
+        ],
+        "checklist": request["checklist"],
+        "history": request["history"],
+        "candidate_index": request["candidate_index"],
+    }
+    print(f"Final coverage audit: {len(request['checklist']['events']) if request['checklist'] else 0} independently discovered events", flush=True)
+    coverage = codex_review(coverage_payload, prompt, output, CoverageAuditReview, allow_web=True)
+    return AuditReview(stories=all_story_reviews, coverage=coverage.coverage)
 
 
 def verify_final_audit(review, history, now=None):
@@ -106,11 +173,11 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
     if not audit_file and previous_path.exists() and response_path.exists():
         previous_request = json.loads(previous_path.read_text())
         previous_response = json.loads(response_path.read_text())
-        # An interrupted recheck may have written its new request but not a new
-        # response. Recover the original pair only when its hash still matches.
-        if previous_response.get("requestHash") == request["requestHash"]:
-            previous_request = request
-        if previous_request.get("requestHash") == request["requestHash"]:
+        # An interrupted run can leave a new request beside an older response.
+        # Only reuse a response that is bound to both the saved and current request.
+        saved_hash = previous_request.get("requestHash")
+        if (saved_hash == request["requestHash"]
+                and previous_response.get("requestHash") == saved_hash):
             previous_report = validate_audit(previous_response, previous_request)
             atomic_json(output / f"audit-record-{previous_report.requestHash}.json",
                         {"request": previous_request, "response": previous_response})
@@ -131,13 +198,18 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
                 atomic_json(output / "quality-review-request.json", request)
                 atomic_json(output / "quality-review-response.json", envelope)
                 report = validate_audit(envelope, request)
-                require_publishable(report)
-                atomic_json(output / "quality-audit.json", report.model_dump(mode="json"))
-                atomic_json(root / "data/quality/history" / f"{date}-{request['requestHash']}.json",
-                            report.model_dump(mode="json"))
-                review["finalAudit"] = {"checklist": checklist, "envelope": envelope}
-                atomic_json(output / "latest.json", review)
-                return report
+                if report.status == "passed":
+                    atomic_json(output / "quality-audit.json", report.model_dump(mode="json"))
+                    atomic_json(root / "data/quality/history" / f"{date}-{request['requestHash']}.json",
+                                report.model_dump(mode="json"))
+                    review["finalAudit"] = {"checklist": checklist, "envelope": envelope}
+                    atomic_json(output / "latest.json", review)
+                    return report
+                # Pruning cannot resolve a separate coverage omission. Keep the
+                # passing story checks and ask the coverage desk to reassess it.
+                reused = kept
+                previous_report = report
+                previous_request = request
             ids = repairable_ids(previous_report)
             if ids:
                 prompt = Path(__file__).resolve().parents[2] / "config/audit-repair-prompt.md"
@@ -160,13 +232,8 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
     else:
         prompt = Path(__file__).resolve().parents[2] / "config/edition-audit-prompt.md"
         pending = [key for key in request["selection"]["selected_ids"] if key not in {story.id for story in reused}]
-        payload = {**request, "auditStoryIds": pending,
-                   "verifiedStoryReviews": [story.model_dump(mode="json") for story in reused]}
         print(f"Final factual audit: {len(pending)} stories; {len(reused)} unchanged checks reused", flush=True)
-        result = codex_review(payload, prompt, output, AuditReview, allow_web=True)
-        if sorted(story.id for story in result.stories) != sorted(pending):
-            raise ValueError("Final audit must check every pending story exactly once")
-        result.stories.extend(reused)
+        result = run_batched_audit(request, prompt, output, reused)
         envelope = {"requestHash": request["requestHash"], "reviewer": f"independent-final-desk; {len(reused)} unchanged checks reused",
                     "reviewedAt": datetime.now(timezone.utc).isoformat(), "review": result.model_dump(mode="json")}
     atomic_json(output / "quality-review-response.json", envelope)

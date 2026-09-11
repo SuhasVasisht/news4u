@@ -60,13 +60,11 @@ def prunable_optional_ids(report, checklist):
               if story.verdict != "pass" or any(claim.verdict != "supported" for claim in story.claims)}
     if not failed:
         return []
-    if any(not any(blocker.startswith(f"{story_id}:") for story_id in failed)
+    if any(not blocker.startswith("Must-cover event unresolved:")
+           and not any(blocker.startswith(f"{story_id}:") for story_id in failed)
            for blocker in report.blockers):
         return []
     must_cover = {event["id"] for event in checklist["events"] if event["mustCover"]}
-    if any(item.event_id in must_cover and item.status != "covered"
-           for item in report.review.coverage):
-        return []
     if any(failed.intersection(item.story_ids)
            for item in report.review.coverage if item.event_id in must_cover):
         return []

@@ -5,10 +5,10 @@ import json
 import pytest
 
 from news_collector.pipeline.publication_history import history_hash
-from news_collector.pipeline.quality_review import audit_request, verify_final_audit
+from news_collector.pipeline.quality_review import audit_request, normalize_batch_ids, verify_final_audit
 from news_collector.pipeline import quality_review
 from test_edition_audit import fixture, NOW
-from news_collector.pipeline.edition_audit import AuditReview
+from news_collector.pipeline.edition_audit import AuditReview, CoverageAuditReview, StoryAuditReview
 
 
 def reviewed_fixture():
@@ -39,6 +39,44 @@ def test_coverage_request_explains_pre_review_exclusions():
     request = audit_request(review, [], review["finalAudit"]["checklist"])
     assert request["candidate_index"][-1]["decision"] == "excluded_before_review"
     assert request["candidate_index"][-1]["reason"] == "candidate_budget"
+
+
+def test_story_batch_normalizes_one_character_opaque_id_typo():
+    story = StoryAuditReview.model_validate({
+        "stories": reviewed_fixture()["finalAudit"]["envelope"]["review"]["stories"]
+    }).stories[0]
+    story.id = "b"
+    normalize_batch_ids([story], ["a"])
+    assert story.id == "a"
+
+
+def test_story_batch_rejects_reordered_known_ids():
+    template = reviewed_fixture()["finalAudit"]["envelope"]["review"]["stories"][0]
+    stories = StoryAuditReview.model_validate({"stories": [
+        {**template, "id": "b"}, {**template, "id": "a"},
+    ]}).stories
+    with pytest.raises(ValueError, match="changed or reordered"):
+        normalize_batch_ids(stories, ["a", "b"])
+
+
+def test_interrupted_request_does_not_reuse_an_older_response(tmp_path, monkeypatch):
+    review = reviewed_fixture()
+    final = review.pop("finalAudit")
+    output = tmp_path / "data/editorial"
+    output.mkdir(parents=True)
+    (output / "quality-review-request.json").write_text(json.dumps(
+        audit_request(review, [], final["checklist"])))
+    stale = deepcopy(final["envelope"])
+    stale["requestHash"] = "older-edition"
+    (output / "quality-review-response.json").write_text(json.dumps(stale))
+    monkeypatch.setattr(quality_review, "load_history", lambda *_: [])
+    monkeypatch.setattr(quality_review, "discover_coverage", lambda *_: final["checklist"])
+    monkeypatch.setattr(quality_review, "reconsider_announcements", lambda *_: None)
+    monkeypatch.setattr(quality_review, "run_batched_audit", lambda *_: AuditReview.model_validate(final["envelope"]["review"]))
+    monkeypatch.setattr(quality_review, "datetime", type("Clock", (datetime,), {
+        "now": classmethod(lambda cls, tz=None: NOW),
+    }))
+    assert quality_review.run_quality_review(tmp_path, review).status == "passed"
 
 
 @pytest.mark.parametrize("passed", [True, False])
@@ -93,12 +131,15 @@ def test_automatic_recheck_is_bounded_and_never_bypasses_hold(tmp_path, monkeypa
     monkeypatch.setattr(quality_review, "reconsider_announcements", lambda *_: None)
     calls = []
     def audit(payload, prompt, output, result_type, *, allow_web=False):
-        assert allow_web and result_type is AuditReview
+        assert allow_web
         calls.append(payload)
-        result = AuditReview.model_validate(final["envelope"]["review"])
-        if len(calls) == 1 or not recovers:
-            result.stories[0].verdict = "hold"
-        return result
+        if result_type is StoryAuditReview:
+            result = StoryAuditReview(stories=final["envelope"]["review"]["stories"])
+            if len([call for call in calls if call["auditMode"] == "story_claims"]) == 1 or not recovers:
+                result.stories[0].verdict = "hold"
+            return result
+        assert result_type is CoverageAuditReview
+        return CoverageAuditReview(coverage=final["envelope"]["review"]["coverage"])
     monkeypatch.setattr(quality_review, "codex_review", audit)
     if recovers:
         assert quality_review.run_quality_review(tmp_path, review).status == "passed"
@@ -106,4 +147,6 @@ def test_automatic_recheck_is_bounded_and_never_bypasses_hold(tmp_path, monkeypa
         with pytest.raises(ValueError, match="blocked publication"):
             quality_review.run_quality_review(tmp_path, review)
         assert "finalAudit" not in json.loads((tmp_path / "data/editorial/latest.json").read_text())
-    assert len(calls) == 2
+    assert len(calls) == 4
+    assert [call["auditMode"] for call in calls] == [
+        "story_claims", "coverage_reconciliation", "story_claims", "coverage_reconciliation"]

@@ -1,9 +1,7 @@
 export function NewsMark() {
   return <svg className="masthead-mark" viewBox="0 0 64 64" aria-hidden="true">
-    <g fill="none" stroke="currentColor" strokeWidth="5" strokeLinecap="square" strokeLinejoin="miter">
-      <path d="M9.5 7.5h32l13 13v36h-45z" />
-      <path d="M41.5 7.5v13h13" />
-      <path d="M19 44V21l21 23V23" />
-    </g>
+    <path d="M7 7h22v22H7zm28 28h22v22H35z" fill="currentColor" />
+    <path d="M37 9h18v18H37zM9 37h18v18H9z" fill="none" stroke="currentColor" strokeWidth="4" />
+    <circle cx="32" cy="32" r="5" fill="var(--paper)" stroke="currentColor" strokeWidth="3" />
   </svg>;
 }

@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from typing import Literal
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
@@ -63,13 +64,22 @@ class StoryAudit(StrictModel):
 class CoverageAudit(StrictModel):
     event_id: str
     story_ids: list[str]
+    prior_story_ids: list[str] = Field(default_factory=list)
     status: Literal["covered", "missing", "not_applicable"]
-    cause: Literal["covered", "discovery", "extraction", "deduplication", "selection", "after_cutoff", "out_of_scope"]
+    cause: Literal["covered", "discovery", "extraction", "deduplication", "selection", "after_cutoff", "out_of_scope", "previously_published"]
     reason: str = Field(min_length=10)
 
 
 class AuditReview(StrictModel):
     stories: list[StoryAudit]
+    coverage: list[CoverageAudit]
+
+
+class StoryAuditReview(StrictModel):
+    stories: list[StoryAudit]
+
+
+class CoverageAuditReview(StrictModel):
     coverage: list[CoverageAudit]
 
 
@@ -100,6 +110,15 @@ def _plain(value):
 
 def _current(value, now):
     return value.tzinfo is not None and timedelta(minutes=-5) <= now - value <= timedelta(hours=24)
+
+
+def _must_cover(event):
+    if not event.mustCover:
+        return False
+    hosts = {urlparse(str(source.url)).hostname or "" for source in event.sources}
+    authoritative = any(host.endswith((".gov", ".gov.uk", ".europa.eu", ".int"))
+                        or host in {"ecb.europa.eu", "who.int"} for host in hosts)
+    return authoritative or len(hosts) >= 2
 
 
 def build_audit_request(packets, decisions, selection, history, checklist, now=None, candidate_index=None):
@@ -186,20 +205,26 @@ def validate_audit(payload, request, now=None):
     coverage = audit.review.coverage
     if Counter(c.event_id for c in coverage) != Counter(e.id for e in events):
         raise ValueError("Audit must account for every independently discovered event exactly once")
-    required = {e.id for e in events if e.mustCover}
+    required = {e.id for e in events if _must_cover(e)}
     omissions = 0
     for item in coverage:
-        if len(set(item.story_ids)) != len(item.story_ids) or not set(item.story_ids) <= set(selected):
+        if (len(set(item.story_ids)) != len(item.story_ids)
+                or not set(item.story_ids) <= set(selected)
+                or len(set(item.prior_story_ids)) != len(item.prior_story_ids)
+                or not set(item.prior_story_ids) <= prior_ids):
             raise ValueError("Coverage must reference unique selected stories")
-        if item.status == "covered" and (not item.story_ids or item.cause != "covered"):
+        if item.status == "covered" and (not item.story_ids or item.prior_story_ids or item.cause != "covered"):
             raise ValueError("Covered event requires selected stories and covered cause")
         if item.status != "covered" and (item.story_ids or item.cause == "covered"):
             raise ValueError("Uncovered event cannot claim selected coverage")
-        if item.status == "not_applicable" and item.cause not in {"after_cutoff", "out_of_scope"}:
+        if item.cause == "previously_published" and (item.status != "not_applicable" or not item.prior_story_ids):
+            raise ValueError("Previously published coverage requires known prior story IDs")
+        if item.status == "not_applicable" and item.cause not in {"after_cutoff", "out_of_scope", "previously_published"}:
             raise ValueError("Not-applicable event needs explicit scope or cutoff reason")
         if item.status == "missing":
             omissions += 1
-        if item.event_id in required and item.status != "covered":
+        if (item.event_id in required and item.status != "covered"
+                and item.cause != "previously_published"):
             blockers.append(f"Must-cover event unresolved: {item.event_id} ({item.cause})")
     metrics = {"selectedStories": len(selected), "reviewedStories": len(reviews),
                "discoveredEvents": len(events), "mustCoverEvents": len(required),
