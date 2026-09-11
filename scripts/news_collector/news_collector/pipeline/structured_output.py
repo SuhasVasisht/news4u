@@ -8,6 +8,9 @@ def review_schema(model):
     def visit(node):
         if isinstance(node, dict):
             node.pop("default", None)
+            # URI is not a supported response format; Pydantic still validates URLs.
+            if node.get("format") == "uri":
+                node.pop("format")
             if "properties" in node:
                 node["required"] = list(node["properties"])
                 node["additionalProperties"] = False
