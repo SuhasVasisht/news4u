@@ -3,6 +3,15 @@
 Audit the selected edition, not the merits of your previous selection. Return the
 AuditReview JSON schema. Do not change article text or fabricate evidence.
 
+Use live web search and open source pages when verification requires it, including
+current political, legal, financial and medical claims. Do not bypass unavailable
+verification. External research can corroborate or contradict the supplied evidence;
+it cannot make a packet chunk support a fact that is absent from that chunk.
+When auditStoryIds is supplied, return story reviews for exactly those IDs. Other
+verifiedStoryReviews are unchanged checks from a prior validated, hash-bound audit;
+use them for cross-story context but do not return them again. Still review every
+checklist event, and check the pending stories against all selected and prior events.
+
 Read every selected headline, summary, point and notes section against its complete
 source packet. Check all consequential factual claims, especially names, amounts,
 dates, results, causal statements and quotations. `passage` must quote exact text

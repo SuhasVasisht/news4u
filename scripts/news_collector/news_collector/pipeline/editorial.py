@@ -149,7 +149,8 @@ def exclusion(row, now):
 def content_packet(row, repository, user_agent):
     raw = json.loads(row.get("raw_json") or "{}")
     published_at = row["published_at"]
-    newsletter_date = raw.get("_date_basis") == "newsletter_sent_at"
+    from news_collector.pipeline.publication_dates import needs_publisher_date
+    newsletter_date = needs_publisher_date(row)
     if newsletter_date:
         from news_collector.pipeline.publication_dates import article_publication_date
         with httpx.Client(timeout=15, follow_redirects=False, headers={"User-Agent": user_agent}) as client:
@@ -218,7 +219,7 @@ def source_hash(row):
         ["canonical_url", "title", "published_at", "text", "summary"]}, sort_keys=True).encode()).hexdigest()
 
 
-def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch):
+def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, allow_web=False):
     executable = shutil.which(os.environ.get("NEWS_EDITOR_CODEX_BIN", "codex"))
     if not executable:
         raise RuntimeError("Codex CLI required for editorial review. Previous paper retained.")
@@ -231,7 +232,7 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch):
                    "--skip-git-repo-check", "--sandbox", "read-only", "-C", directory,
                    "--disable", "shell_tool", "--disable", "unified_exec", "--disable", "apps",
                    "--disable", "hooks", "--disable", "browser_use", "--disable", "computer_use",
-                   "-c", 'web_search="disabled"', "--output-schema", str(schema),
+                   "-c", 'web_search="live"' if allow_web else 'web_search="disabled"', "--output-schema", str(schema),
                    "-o", str(result_path), "-"]
         model = os.environ.get("NEWS_EDITOR_MODEL")
         if model:

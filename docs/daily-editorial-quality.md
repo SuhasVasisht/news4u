@@ -58,6 +58,16 @@ published claims against cited evidence, distinguishes allegations and company
 claims from established facts, and traces omissions to discovery, extraction,
 deduplication or selection. Must-cover omissions, unsupported or uncertain claims,
 promotional stories, unexplained repeat events and incomplete checks block export.
+The final auditor and claim-repair pass have live web access for required current
+verification, but no shell or account tools. External findings cannot substitute
+for missing packet evidence. One automatic repair/recheck is allowed; a remaining
+hold stops publication. Markdown citations from that pass are parsed into plain
+reader-facing prose before the factual audit, not changed after it.
+
+An unchanged passed story check can be reused only when the full evidence,
+selection, history, checklist, cutoff and that story's published decision still
+match. Held or structurally incomplete checks are never reused. Coverage is
+reviewed again, and the combined audit must pass all edition-wide checks.
 
 The audit is hash-bound to the evidence, article text, selection, candidate index,
 history and checklist. It cannot be reused after those inputs change. Structural
@@ -92,6 +102,25 @@ cd scripts/news_collector
 An externally researched checklist or final audit can be supplied with
 `--checklist-file` or `--audit-file`. External reviews must satisfy the same schema,
 freshness and input-hash checks. Do not hand-edit the paper to bypass a failed gate.
+
+## Finishing after midnight
+
+An explicitly dated revision may finish the currently published edition after
+midnight without calling it a new day's newspaper. The review cutoff must match
+the requested date, which can only be today or yesterday; evidence and sports
+must still be less than 24 hours old. Default builds remain today-only.
+
+```sh
+cd scripts/news_collector
+.venv/bin/python -m news_collector.jobs.export_edition --edition-date 2026-09-10
+cd ../..
+npm run build:static -- --edition-date 2026-09-10
+npm run deploy:static -- --revise-edition 2026-09-10
+```
+
+Use the actual edition date, not the example date. Deployment rejects a dated
+revision if a newer edition is already published, and retains the previous
+revision in the archive. Generation timestamps remain actual wall-clock times.
 
 ## Source limitations
 

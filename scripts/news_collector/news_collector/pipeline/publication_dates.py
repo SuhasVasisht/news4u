@@ -6,6 +6,11 @@ from selectolax.parser import HTMLParser
 from news_collector.utils import parse_datetime
 
 
+def needs_publisher_date(row):
+    raw = json.loads(row.get("raw_json") or "{}")
+    return row.get("source") in {"tldr_tech", "tldr_ai"} or raw.get("_date_basis") == "newsletter_sent_at"
+
+
 def article_publication_date(html):
     page = HTMLParser(html)
     for selector in ('meta[property="article:published_time"]', 'meta[name="datePublished"]',

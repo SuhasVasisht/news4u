@@ -16,6 +16,9 @@ async function main() {
   const lock = await open("data/static-build.lock", "wx").catch(() => { throw new Error("Another static build is running (data/static-build.lock)."); });
   try {
     const designOnly = process.argv.includes("--design-only");
+    const dateIndex = process.argv.indexOf("--edition-date");
+    const editionDate = dateIndex >= 0 ? process.argv[dateIndex + 1] : undefined;
+    if (dateIndex >= 0 && (!editionDate || editionDate.startsWith("--") || designOnly)) throw new Error("--edition-date requires an explicit date and cannot be design-only");
     if (designOnly && process.argv.some(arg => ["--collect", "--review-file", "--prepare-review", "--prepare-sports", "--sports-review-file"].includes(arg))) throw new Error("Design-only builds cannot collect or review news");
     const reviewIndex = process.argv.indexOf("--review-file");
     const reviewFile = reviewIndex >= 0 ? process.argv[reviewIndex + 1] : undefined;
@@ -41,10 +44,10 @@ async function main() {
       if (!sportsFile) execFileSync(python, ["-m", "news_collector.jobs.editorial", ...reviewArgs], { cwd, stdio: "inherit", timeout: 90 * 60_000 });
       if (process.argv.includes("--prepare-review")) { console.log("Review request prepared. No new paper was published."); return; }
       if (process.argv.includes("--collect")) execFileSync(python, ["-m", "news_collector.jobs.sports"], { cwd, stdio: "inherit", timeout: 30 * 60_000 });
-      execFileSync(python, ["-m", "news_collector.jobs.export_edition"], { cwd, stdio: "inherit", timeout: 60_000 });
+      execFileSync(python, ["-m", "news_collector.jobs.export_edition", ...(editionDate ? ["--edition-date", editionDate] : [])], { cwd, stdio: "inherit", timeout: 60_000 });
     }
     const edition = editionSchema.parse(JSON.parse(await readFile("data/edition.json", "utf8")));
-    const today = designOnly ? await verifyDesignOnly(process.cwd(), edition) : validateBuildFreshness(edition);
+    const today = designOnly ? await verifyDesignOnly(process.cwd(), edition) : validateBuildFreshness(edition, new Date(), editionDate);
     if (!designOnly) {
       await prepareMedia(process.cwd(), edition);
       await writeFile("data/edition.json.tmp", JSON.stringify(edition, null, 2));

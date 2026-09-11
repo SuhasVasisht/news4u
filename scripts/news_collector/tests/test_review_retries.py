@@ -7,6 +7,20 @@ from news_collector.pipeline import editorial
 from test_editorial import packet, decision, row
 
 
+@pytest.mark.parametrize("allow_web", [False, True])
+def test_live_verification_is_explicit_without_enabling_shells(tmp_path, monkeypatch, allow_web):
+    monkeypatch.setattr(editorial.shutil, "which", lambda _: "/bin/codex")
+    def run(command, **kwargs):
+        assert ('web_search="live"' if allow_web else 'web_search="disabled"') in command
+        assert "shell_tool" in command and "unified_exec" in command and "apps" in command
+        editorial.Path(command[command.index("-o") + 1]).write_text(editorial.ReviewBatch(decisions=[decision()]).model_dump_json())
+        return SimpleNamespace(returncode=0, stderr="")
+    monkeypatch.setattr(editorial.subprocess, "run", run)
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("Verify this report")
+    assert editorial.codex_review([packet()], prompt, tmp_path, allow_web=allow_web).decisions
+
+
 @pytest.mark.parametrize("recovers", [True, False])
 def test_invalid_admission_gets_one_bounded_retry(tmp_path, monkeypatch, recovers):
     calls = []

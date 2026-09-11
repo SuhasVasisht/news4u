@@ -83,8 +83,12 @@ export function briefingStories(stories: EditionStory[], limit = 8) {
   return selected.sort((a, b) => priority(b) - priority(a) || Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
 }
 
-export function validateBuildFreshness(edition: EditionData, now = new Date()) {
-  const today = dateInZone(now.toISOString(), edition.timezone);
+export function validateBuildFreshness(edition: EditionData, now = new Date(), editionDate?: string) {
+  const calendarToday = dateInZone(now.toISOString(), edition.timezone);
+  const today = editionDate ?? calendarToday;
+  const dateAge = Date.parse(calendarToday) - Date.parse(today);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(today) || !Number.isFinite(dateAge) || dateAge < 0 || dateAge > 86400_000) throw new Error("Explicit revision date must be today or yesterday");
+  if (new Date(today).toISOString().slice(0, 10) !== today) throw new Error("Invalid revision date");
   const age = now.getTime() - Date.parse(edition.generatedAt);
   if (edition.date !== today || age > 24 * 3600_000 || age < -300_000) throw new Error("Refusing to publish a stale or future snapshot. Run npm run build:daily.");
   if (!edition.stories.some(s => dateInZone(s.publishedAt, edition.timezone) === today)) throw new Error("No stories published today. Previous static HTML was not replaced.");

@@ -1,4 +1,5 @@
 from copy import deepcopy
+from datetime import datetime
 import json
 
 import pytest
@@ -7,6 +8,7 @@ from news_collector.pipeline.publication_history import history_hash
 from news_collector.pipeline.quality_review import audit_request, verify_final_audit
 from news_collector.pipeline import quality_review
 from test_edition_audit import fixture, NOW
+from news_collector.pipeline.edition_audit import AuditReview
 
 
 def reviewed_fixture():
@@ -75,3 +77,33 @@ def test_final_gate_rejects_changes_after_review(target):
         review["decisions"]["a"]["summary" if target == "summary" else "reason"] = "Changed content"
     with pytest.raises(ValueError, match="does not match"):
         verify_final_audit(review, [], NOW)
+
+
+@pytest.mark.parametrize("recovers", [True, False])
+def test_automatic_recheck_is_bounded_and_never_bypasses_hold(tmp_path, monkeypatch, recovers):
+    review = reviewed_fixture()
+    final = review.pop("finalAudit")
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW
+    monkeypatch.setattr(quality_review, "datetime", Clock)
+    monkeypatch.setattr(quality_review, "load_history", lambda *_: [])
+    monkeypatch.setattr(quality_review, "discover_coverage", lambda *_: final["checklist"])
+    monkeypatch.setattr(quality_review, "reconsider_announcements", lambda *_: None)
+    calls = []
+    def audit(payload, prompt, output, result_type, *, allow_web=False):
+        assert allow_web and result_type is AuditReview
+        calls.append(payload)
+        result = AuditReview.model_validate(final["envelope"]["review"])
+        if len(calls) == 1 or not recovers:
+            result.stories[0].verdict = "hold"
+        return result
+    monkeypatch.setattr(quality_review, "codex_review", audit)
+    if recovers:
+        assert quality_review.run_quality_review(tmp_path, review).status == "passed"
+    else:
+        with pytest.raises(ValueError, match="blocked publication"):
+            quality_review.run_quality_review(tmp_path, review)
+        assert "finalAudit" not in json.loads((tmp_path / "data/editorial/latest.json").read_text())
+    assert len(calls) == 2

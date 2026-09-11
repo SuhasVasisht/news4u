@@ -55,6 +55,16 @@ describe("shared edition", () => {
     const state = parseReaderState({ saved: [story.id], library: [story] });
     expect(state.library[0].title).toBe(story.title);
   });
+  it("allows an explicit overnight revision without changing its date or relaxing freshness", () => {
+    const edition: EditionData = { date: "2026-09-08", generatedAt: "2026-09-09T07:02:00Z", timezone: "America/Los_Angeles", windowHours: 48, stories: [story], sources: [] };
+    const now = new Date("2026-09-09T07:05:00Z");
+    expect(() => validateBuildFreshness(edition, now)).toThrow(/stale/);
+    expect(validateBuildFreshness(edition, now, "2026-09-08")).toBe("2026-09-08");
+    expect(edition.date).toBe("2026-09-08");
+    expect(() => validateBuildFreshness(edition, now, "2026-09-07")).toThrow();
+    expect(() => validateBuildFreshness(edition, now, "2026-09-10")).toThrow();
+    expect(() => validateBuildFreshness({ ...edition, generatedAt: "2026-09-08T06:00:00Z" }, now, "2026-09-08")).toThrow(/stale/);
+  });
   it("retains sports metadata and rejects yesterday's score snapshot", () => {
     const sportsStory = editionStorySchema.parse({ ...story, sector: "Sports", sportsGroup: "NFL" });
     expect(sportsStory.sportsGroup).toBe("NFL");

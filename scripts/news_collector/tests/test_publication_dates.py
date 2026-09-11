@@ -2,10 +2,16 @@ import pytest
 import json
 from datetime import datetime, timedelta, timezone
 
-from news_collector.pipeline.publication_dates import article_publication_date
+from news_collector.pipeline.publication_dates import article_publication_date, needs_publisher_date
 from news_collector.pipeline import editorial
 from news_collector.jobs.export_edition import assemble_reviewed
 from test_editorial import row, packet, decision
+
+
+@pytest.mark.parametrize("source", ["tldr_tech", "tldr_ai"])
+def test_tldr_web_discovery_also_requires_original_date(source):
+    assert needs_publisher_date({"source": source})
+    assert not needs_publisher_date({"source": "alphasignal"})
 
 
 @pytest.mark.parametrize("html", [

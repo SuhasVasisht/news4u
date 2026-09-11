@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import argparse
 import json
 import os
 import re
@@ -15,6 +16,7 @@ from selectolax.parser import HTMLParser
 from rapidfuzz import fuzz
 
 from news_collector.pipeline.dedupe import cluster_items
+from news_collector.pipeline.publication_dates import needs_publisher_date
 from news_collector.pipeline.editorial import Decision, exclusion, validate_decisions, ReviewBatch, source_hash, LONGFORM
 from news_collector.runtime import build_runtime
 from news_collector.utils import parse_datetime, normalize_title
@@ -120,13 +122,14 @@ def build_snapshot(rows: list[dict], now: datetime, timezone_name: str = "Americ
     return snapshot, audit
 
 
-def assemble_reviewed(rows, review, now, timezone_name, history=None, discoveries=None, audited_selection=False):
+def assemble_reviewed(rows, review, now, timezone_name, history=None, discoveries=None, audited_selection=False, edition_date=None):
     from news_collector.pipeline.publication_history import prior_match, history_hash
     if history is not None and review.get("historyHash") != history_hash(history):
         raise RuntimeError("Publication history changed; repeat editorial review")
     reviewed_at = parse_datetime(review.get("generatedAt"))
     if not reviewed_at or now - reviewed_at > timedelta(hours=24) or reviewed_at > now + timedelta(minutes=5):
         raise RuntimeError("Current editorial review required before publishing")
+    edition_date = edition_date or now.astimezone(ZoneInfo(timezone_name)).date().isoformat()
     packets = {p["id"]: p for p in review["packets"]}
     decisions = {key: Decision.model_validate(value) for key, value in review["decisions"].items()}
     if any(key != decision.id for key, decision in decisions.items()):
@@ -144,12 +147,12 @@ def assemble_reviewed(rows, review, now, timezone_name, history=None, discoverie
         row = next((r for r in matching if not packet.get("inputHash") or source_hash(r) == packet["inputHash"]), None)
         if matching and not row:
             raise RuntimeError("Source changed since editorial review; review again before publication")
-        if row and json.loads(row.get("raw_json") or "{}").get("_date_basis") == "newsletter_sent_at" and packet.get("publicationDateBasis") != "publisher_metadata":
+        if row and needs_publisher_date(row) and packet.get("publicationDateBasis") != "publisher_metadata":
             raise RuntimeError("Newsletter-linked article requires publisher date verification; repeat editorial review")
         if not row or exclusion({**row, "published_at": packet["publishedAt"]}, now) or decision.decision != "admit" or key not in review.get("selection", {}).get("selected_ids", review["decisions"]):
             rejected.append({"id": key, "reason": selection_reasons.get(key, decision.reason)})
             continue
-        prior = prior_match(packet["url"], packet["title"], history or [], now.astimezone(ZoneInfo(timezone_name)).date().isoformat())
+        prior = prior_match(packet["url"], packet["title"], history or [], edition_date)
         if prior:
             raise RuntimeError(f"Previously published story selected again: {key} from {prior['date']}")
         sector = "Listening room" if decision.kind == "podcast" else decision.sector or packet.get("sector") or SECTORS.get(packet["category"], "Other")
@@ -189,7 +192,7 @@ def assemble_reviewed(rows, review, now, timezone_name, history=None, discoverie
         story["editorialRank"] = rank
     if not selected:
         raise RuntimeError("Editorial gate admitted no stories; previous edition retained")
-    snapshot = {"date": now.astimezone(ZoneInfo(timezone_name)).date().isoformat(),
+    snapshot = {"date": edition_date,
                 "generatedAt": now.isoformat(), "timezone": timezone_name, "windowHours": 48,
                 "stories": selected, "sources": [], "editorialReviewedAt": review["generatedAt"]}
     eligible_rows = [row for row in rows if not exclusion(row, now)]
@@ -219,7 +222,23 @@ def verify_snapshot_images(snapshot, repository):
     return {"verified": len(verified), "omitted": len(snapshot["stories"]) - len(verified), "images": verified}
 
 
+def export_date(review, now, zone, requested=None):
+    today = now.astimezone(ZoneInfo(zone)).date()
+    if requested is None:
+        return today.isoformat()
+    target = datetime.strptime(requested, "%Y-%m-%d").date()
+    cutoff = parse_datetime(review.get("cutoff"))
+    if (not cutoff or target.isoformat() != requested or target != cutoff.astimezone(ZoneInfo(zone)).date()
+            or not timedelta(0) <= today - target <= timedelta(days=1)
+            or not timedelta(0) <= now - cutoff <= timedelta(hours=24)):
+        raise ValueError("Late revision must match a current review's original edition date")
+    return requested
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--edition-date")
+    args = parser.parse_args()
     settings, config, repository, _ = build_runtime()
     now = datetime.now(timezone.utc)
     with repository.db.connect() as conn:
@@ -233,13 +252,14 @@ def main() -> None:
         raise RuntimeError("Complete editorial and final-edition review required before export")
     from news_collector.pipeline.publication_history import load_history
     zone = os.environ.get("APP_TIMEZONE", "America/Los_Angeles")
-    history = load_history(settings.project_root.parent.parent, now.astimezone(ZoneInfo(zone)).date().isoformat())
+    edition_date = export_date(review, now, zone, args.edition_date)
+    history = load_history(settings.project_root.parent.parent, edition_date)
     enabled = {s["name"] for s in config["collectors"] if s.get("enabled", True)}
     discoveries = repository.source_discoveries()
     from news_collector.pipeline.quality_review import verify_final_audit
     final_audit = verify_final_audit(review, history, now)
     snapshot, audit = assemble_reviewed(rows, review, now, zone, history,
-                                       [r for r in discoveries if r["source"] in enabled], audited_selection=True)
+                                       [r for r in discoveries if r["source"] in enabled], audited_selection=True, edition_date=edition_date)
     if [s["id"] for s in snapshot["stories"]] != review["selection"]["selected_ids"]:
         raise RuntimeError("Export changed the audited selection; resolve duplicate/publisher limits at the final desk")
     event_keys = {story.id: story.event_key for story in final_audit.review.stories}

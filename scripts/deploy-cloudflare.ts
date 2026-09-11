@@ -9,6 +9,9 @@ import { verifyLocalRelease } from "./lib/verify-local-release";
 
 async function main() {
   const root = process.cwd();
+  const revisionIndex = process.argv.indexOf("--revise-edition");
+  const editionDate = revisionIndex >= 0 ? process.argv[revisionIndex + 1] : undefined;
+  if (revisionIndex >= 0 && (!editionDate || editionDate.startsWith("--") || process.argv.includes("--design-only"))) throw new Error("--revise-edition requires an explicit date and cannot be design-only");
   try { loadEnvFile(path.join(root, ".env")); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   const token = process.env.CLOUDFLARE_API_TOKEN || process.env.CLOUFLARE_API_KEY;
   const account = process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CLOUFLARE_ACCOUNT;
@@ -38,7 +41,7 @@ async function main() {
     // Domain-only retries verify the already uploaded release, even after its publication day.
     const { bundle, manifest } = process.argv.includes("--skip-upload")
       ? { bundle: path.join(root, "data/cloudflare-bundle"), manifest: JSON.parse(await readFile(path.join(root, "data/cloudflare-bundle/edition-manifest.json"), "utf8")) as { date: string; generatedAt: string; stories: number } }
-      : await prepareRelease(root, secrets, { reviseToday: process.argv.includes("--revise-today"), designOnly: process.argv.includes("--design-only") });
+      : await prepareRelease(root, secrets, { reviseToday: process.argv.includes("--revise-today") || Boolean(editionDate), designOnly: process.argv.includes("--design-only"), editionDate });
     if (!process.argv.includes("--skip-upload")) {
       await verifyLocalRelease(root, bundle);
       console.log(`Deploying ${manifest.stories} stories for ${manifest.date} to ${config.project}`);

@@ -57,10 +57,10 @@ export function assertPublicFile(name: string, body: Buffer, secrets: string[]) 
   if (secrets.some(value => value.length >= 12 && body.includes(value))) throw new Error(`Credential found in public file: ${name}`);
 }
 
-export async function prepareRelease(root: string, secrets: string[], options: { reviseToday?: boolean; designOnly?: boolean } = {}) {
+export async function prepareRelease(root: string, secrets: string[], options: { reviseToday?: boolean; designOnly?: boolean; editionDate?: string } = {}) {
   const edition = editionSchema.parse(JSON.parse(await readFile(path.join(root, "data/edition.json"), "utf8")));
   if (options.designOnly) await verifyDesignOnly(root, edition);
-  else validateBuildFreshness(edition);
+  else validateBuildFreshness(edition, new Date(), options.editionDate);
   if (!edition.editorialReviewedAt) throw new Error("Only editorially reviewed editions can be deployed");
   const index = await readFile(path.join(root, "out/index.html"), "utf8");
   const embedded = index.match(/<script type="application\/json" id="edition-data">([\s\S]*?)<\/script>/)?.[1];
@@ -81,6 +81,7 @@ export async function prepareRelease(root: string, secrets: string[], options: {
   let previous;
   try { previous = embeddedEdition(await readFile(path.join(bundle, "index.html"), "utf8")); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  if (options.editionDate && previous?.date !== edition.date) throw new Error("Explicit dated revisions must target the currently published edition");
   if (previous) assertNewEdition(edition, previous);
   for (const name of await releaseFiles(bundle)) {
     if (/^editions\/[^/]+\/edition\.json$/.test(name)) {
