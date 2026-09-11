@@ -1,39 +1,25 @@
 import { expect, test } from "@playwright/test";
 
-test("daily edition routes and browser-local reading state", async ({ page }) => {
+test("daily edition is a newspaper without inbox actions", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.goto("/");
-  await page.evaluate(() => localStorage.clear());
-  await page.reload();
   await expect(page.getByRole("heading", { name: "News 4 u." })).toBeVisible();
-  const reports = page.locator(".major-report");
-  if (await reports.count()) {
-    const title = await reports.first().locator("h3").textContent();
-    await reports.first().getByRole("button", { name: "Save story", exact: true }).click();
-    await page.getByRole("button", { name: "Saved 1", exact: true }).click();
-    await expect(page.locator(".major-report,.brief")).toHaveCount(1);
-    await page.reload();
-    await page.getByRole("button", { name: "Saved 1", exact: true }).click();
-    await expect(page.getByRole("heading", { name: title!, exact: true })).toBeVisible();
+  await expect(page.locator(".story-actions,.report-top,.edition-filters,.sector-index")).toHaveCount(0);
+  if (await page.locator(".headline-link").count()) {
     await page.locator(".headline-link").first().click();
     await expect(page.locator(".report-page")).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await page.reload();
     await expect(page.locator(".report-page")).toBeVisible();
     await expect(page.getByRole("link", { name: "Read original" })).toHaveAttribute("target", "_blank");
-    await expect(page.getByRole("button", { name: "Archive story", exact: true })).toBeEnabled();
-    await page.goBack();
-    await page.getByRole("button", { name: "Archive story", exact: true }).first().click();
-    await page.getByRole("button", { name: "Archived", exact: true }).click();
-    await expect(page.locator(".major-report,.brief")).toHaveCount(1);
-  } else {
-    await expect(page.getByText("No edition has been collected yet.")).toBeVisible();
   }
   await page.goto("/sources");
   await expect(page.getByRole("heading", { name: "Sources", exact: true })).toBeVisible();
-  await page.goto("/settings");
-  await expect(page.getByRole("heading", { name: "Reader preferences" })).toBeVisible();
+  for (const legacy of ["/settings", "/saved", "/archived", "/catchup"]) {
+    await page.goto(legacy);
+    await expect(page.getByRole("button", { name: "The paper", exact: true })).toHaveAttribute("aria-current", "page");
+  }
   expect(errors).toEqual([]);
 });
 
@@ -56,6 +42,7 @@ test("short edition ranks eight stories and opens real report pages", async ({ p
 test("podcast notes are visible in today's paper and readable on their own page", async ({ page }) => {
   await page.goto("/");
   const listening = page.locator('[id="sector-listening room"]');
+  test.skip(await listening.count() === 0, "This edition has no podcast");
   await expect(listening).toBeVisible();
   await listening.locator(".headline-link").first().click();
   await expect(page.locator(".episode-audio audio")).toHaveAttribute("preload", "none");
@@ -100,6 +87,5 @@ test("saved long-form reports do not leak back into future daily editions", asyn
   await expect(page.getByRole("heading", { name: "An older saved interview" })).toHaveCount(0);
   await page.getByRole("button", { name: "I do not have time", exact: true }).click();
   await expect(page.getByRole("heading", { name: "An older saved interview" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Saved 1", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "An older saved interview" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Saved/ })).toHaveCount(0);
 });

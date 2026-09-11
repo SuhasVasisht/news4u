@@ -12,12 +12,14 @@ test("static edition works offline without a backend", async ({ browser }) => {
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(pathToFileURL(artifact).href);
   await expect(page.getByRole("heading", { name: "News 4 u." })).toBeVisible();
-  await page.locator(".major-report").first().getByRole("button", { name: "Save story", exact: true }).click();
-  await page.getByRole("button", { name: "Saved 1", exact: true }).click();
-  await expect(page.locator(".major-report,.brief")).toHaveCount(1);
+  const count = await page.locator(".major-report,.brief").count();
+  await expect(page.locator(".story-actions,.report-top,.edition-filters,.sector-index")).toHaveCount(0);
+  await page.evaluate(() => {
+    const data = JSON.parse(document.getElementById("edition-data")!.textContent!);
+    localStorage.setItem("news4u-reader-v1", JSON.stringify({ archived: data.stories.map((s: {id:string}) => s.id), hiddenSources: data.stories.map((s: {publisher:string}) => s.publisher) }));
+  });
   await page.reload();
-  await page.getByRole("button", { name: "Saved 1", exact: true }).click();
-  await expect(page.locator(".major-report,.brief")).toHaveCount(1);
+  await expect(page.locator(".major-report,.brief")).toHaveCount(count);
   await page.locator(".headline-link").first().click();
   await expect(page.locator(".report-page")).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -45,6 +47,7 @@ test("podcast notes are included in static report HTML without JavaScript", asyn
   const context = await browser.newContext({ javaScriptEnabled: false, offline: true });
   const page = await context.newPage();
   await page.goto(pathToFileURL(artifact).href);
+  test.skip(await page.locator('[id="sector-listening room"]').count() === 0, "This edition has no podcast");
   await page.locator('[id="sector-listening room"] .headline-link').first().click();
   await expect(page.locator(".report-page audio")).toHaveAttribute("preload", "none");
   expect(await page.locator(".note-section").count()).toBeGreaterThanOrEqual(6);

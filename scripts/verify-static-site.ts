@@ -84,12 +84,12 @@ export async function verifyStaticSite(base: string, root = process.cwd()) {
     await page.locator(".headline-link").first().click();
     await expect(page.locator(".report-page")).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    await page.getByRole("button", { name: "Save story", exact: true }).click();
     await page.reload();
-    await expect(page.getByRole("button", { name: "Unsave story", exact: true })).toBeVisible();
+    await expect(page.locator(".report-page")).toBeVisible();
+    await expect(page.locator(".story-actions")).toHaveCount(0);
     await page.goBack();
-    await page.getByRole("button", { name: "Today", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Archive story", exact: true }).first()).toBeEnabled();
+    await page.getByRole("button", { name: "The paper", exact: true }).click();
+    await expect(page.locator(".report-top,.edition-filters,.sector-index,.story-actions")).toHaveCount(0);
     await page.locator(".headline-link").first().click();
     await page.getByRole("link", { name: "Back to the edition", exact: true }).click();
     await expect(page.locator(".major-report,.brief")).toHaveCount(edition.stories.length);
