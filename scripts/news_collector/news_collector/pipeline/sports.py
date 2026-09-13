@@ -23,7 +23,9 @@ NOISE = re.compile(r"\b(fantasy|betting|odds|picks|power rankings|tiers|predicti
 
 
 def config_for(settings):
-    return yaml.safe_load((settings.project_root / "config/sports.yaml").read_text())
+    config = yaml.safe_load((settings.project_root / "config/sports.yaml").read_text())
+    config["carryover"] = json.loads((settings.project_root / "config/sports-carryover.json").read_text())
+    return config
 
 
 def fingerprint(value):
@@ -132,11 +134,19 @@ def collect_scores(config, now, client):
     return {"checkedAt": now.isoformat(), "windowStart": start.isoformat(), "windowEnd": end.isoformat(), "leagues": leagues}, health
 
 
+def permitted_carryover(config, prior, today):
+    policy = config.get("carryover", {})
+    return bool(prior and policy.get("date") == today
+                and prior.get("date") == (datetime.fromisoformat(today).date() - timedelta(days=1)).isoformat()
+                and prior.get("id") in policy.get("story_ids", []))
+
+
 def prepare_sports(settings, repository, now, zone):
     config = config_for(settings)
     root = settings.project_root.parent.parent
     history = load_history(root, now.astimezone(ZoneInfo(zone)).date().isoformat())
     packets, health, seen = [], [], set()
+    today = now.astimezone(ZoneInfo(zone)).date().isoformat()
     # ESPN's JSON service accepts the standard HTTP client user-agent, unlike the
     # custom crawler agent used for publisher article retrieval.
     with httpx.Client(timeout=15, follow_redirects=False) as client:
@@ -178,6 +188,21 @@ def prepare_sports(settings, repository, now, zone):
             health.append({"name": feed["name"], "status": "error" if error else "ok", "count": count, "collected": count,
                            "eligible": eligible, "candidates": sum(p["source"] == feed["name"] for p in packets),
                            "latest": latest, "reason": error, "checkedAt": now.isoformat()})
+    carryover = config.get("carryover", {})
+    if carryover.get("date") == today:
+        previous_date = (now.astimezone(ZoneInfo(zone)).date() - timedelta(days=1)).isoformat()
+        archive = root / f"data/cloudflare-published/editions/{previous_date}/edition.json"
+        if archive.exists():
+            for story in json.loads(archive.read_text())["stories"]:
+                if story.get("sector") != "Sports" or not permitted_carryover(config, {"date": previous_date, "id": story["id"]}, today):
+                    continue
+                row = {"canonical_url": story["url"], "url": story["url"], "title": story["title"],
+                       "published_at": story["publishedAt"], "source": story["collectors"][0],
+                       "category": "other", "text": "", "raw_json": "{}"}
+                packet = content_packet(row, repository, settings.user_agent)
+                packet.update(sportsGroup=story["sportsGroup"], carryoverFrom=previous_date)
+                if packet["id"] not in {p["id"] for p in packets}:
+                    packets.append(packet)
     prompt = (settings.project_root / "config/sports-prompt.md").read_text()
     request = {"generatedAt": now.isoformat(), "date": now.astimezone(ZoneInfo(zone)).date().isoformat(), "timezone": zone,
                "packets": packets, "scores": scores, "sources": health + score_health, "historyHash": history_hash(history), "previouslyPublished": history,
@@ -212,9 +237,14 @@ def publish_sports(request, review, settings, repository, now, zone):
         counts[group] += 1
         if counts[group] > LIMITS[group] or len(d.summary.split()) > 95 or len(d.points) > 2 or d.sections:
             raise ValueError("Sports brief exceeds its section or length budget")
-        if prior_match(p["url"], d.headline, history, today):
-            raise ValueError("Previously published sports story selected again")
-        if any(fuzz.token_set_ratio(s["title"], d.headline) >= 85 for s in stories):
+        prior = prior_match(p["url"], d.headline, history, today)
+        if prior:
+            if not permitted_carryover(config_for(settings), prior, today):
+                raise ValueError("Previously published sports story selected again")
+            if p.get("carryoverFrom") != prior["date"] or not d.summary.startswith("From yesterday's late edition:"):
+                raise ValueError("Sports carryover must retain its date and explicit reader label")
+        if any((fuzz.token_set_ratio(s["title"], d.headline) >= 70
+                and fuzz.token_set_ratio(s["summary"], d.summary) >= 50) for s in stories):
             raise ValueError("Overlapping sports headlines selected")
         image = quality_image(repository, p["url"], [], settings.user_agent)["image"]
         stories.append({"id": id, "title": d.headline, "summary": d.summary, "sector": "Sports", "sportsGroup": group,

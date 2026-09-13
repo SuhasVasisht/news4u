@@ -19,6 +19,13 @@ Reject betting, odds, picks, fantasy advice, ads, listicles, speculative transfe
 live blogs that are still changing, and generic previews. Report sourced allegations
 as allegations. Do not infer a final score from in-progress coverage.
 
+Aim to publish at least one evidence-eligible current headline for NFL, NBA and
+Soccer when the group contains one. Judge importance within the sports roundup,
+not only against front-page world news: a completed notable game, confirmed player
+contract, significant injury, or confirmed club decision can be the group's lead.
+Prefer a concise legitimate league update over leaving a group empty, but never
+lower the evidence bar or admit speculation, promotion, listicles or filler.
+
 Elsewhere is ONLY one or two major stories outside NFL, NBA and soccer: a Grand Slam,
 F1 title/race, major golf event, WNBA championship, Olympics, world championship or
 similarly significant result. A daily quota is not a reason to promote weak content.
@@ -30,3 +37,8 @@ Same-day edition revisions can retain that day's important stories.
 Quality must be >=65 and every admission must cite packet evidence. Keep importance
 on the overall newspaper scale, usually 40-70, reserving >80 for exceptional events.
 With no substantive current news, hold everything; the scoreboard still runs.
+
+Packets carrying carryoverFrom are a date-limited reader-authorized exception for
+last night's late edition. Reassess their importance against today's news. If kept,
+start the summary with "From yesterday's late edition:" and retain the original
+publication date. This exception does not apply to any other previous story.

@@ -65,14 +65,12 @@ def prunable_optional_ids(report, checklist):
            for blocker in report.blockers):
         return []
     must_cover = {event["id"] for event in checklist["events"] if event["mustCover"]}
-    if any(failed.intersection(item.story_ids)
-           for item in report.review.coverage if item.event_id in must_cover):
-        return []
-    # Keep the coverage assessment valid verbatim. If a sampled event references
-    # the failed story, it needs a new coverage review instead of automatic pruning.
-    if any(failed.intersection(item.story_ids) for item in report.review.coverage):
-        return []
-    return sorted(failed)
+    protected = set().union(*(failed.intersection(item.story_ids)
+                              for item in report.review.coverage
+                              if item.event_id in must_cover), set())
+    # Optional mapped stories may be removed; quality_review will run a fresh
+    # coverage reconciliation instead of reusing the now-stale mapping.
+    return sorted(failed - protected)
 
 
 def reusable_story_checks(previous_request, request, report):

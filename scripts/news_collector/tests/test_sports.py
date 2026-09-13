@@ -126,3 +126,29 @@ def test_prior_publication_is_checked_again_when_sports_review_is_applied(tmp_pa
     monkeypatch.setattr(sports, "prior_match", lambda *_: {"date": "2026-09-08"})
     with pytest.raises(ValueError, match="Previously published"):
         sports.publish_sports(request, review, settings, None, NOW, "America/Los_Angeles")
+
+
+def test_carryover_is_explicit_and_expires_after_one_edition():
+    config = {"carryover": {"date": "2026-09-10", "story_ids": ["allowed"]}}
+    prior = {"date": "2026-09-09", "id": "allowed"}
+    assert sports.permitted_carryover(config, prior, "2026-09-10")
+    assert not sports.permitted_carryover(config, prior, "2026-09-11")
+    assert not sports.permitted_carryover(config, {**prior, "id": "another"}, "2026-09-10")
+    assert not sports.permitted_carryover(config, {**prior, "date": "2026-09-08"}, "2026-09-10")
+
+
+def test_authorized_carryover_requires_visible_label_and_source_date(tmp_path, monkeypatch):
+    settings, request, review = review_fixture(tmp_path, monkeypatch)
+    config = {"enabled": True, "carryover": {"date": "2026-09-09", "story_ids": ["0"]}}
+    monkeypatch.setattr(sports, "config_for", lambda _: config)
+    monkeypatch.setattr(sports, "prior_match", lambda *_: {"date": "2026-09-08", "id": "0"})
+    request["policy"] = sports.fingerprint({"config": config, "prompt": "Test policy"})
+    request["packets"][0]["carryoverFrom"] = "2026-09-08"
+    request["packets"][0]["publishedAt"] = "2026-09-08T20:00:00-07:00"
+    request["requestHash"] = sports.fingerprint({k: v for k, v in request.items() if k != "requestHash"})
+    review["requestHash"] = request["requestHash"]
+    with pytest.raises(ValueError, match="explicit reader label"):
+        sports.publish_sports(request, review, settings, None, NOW, "America/Los_Angeles")
+    review["decisions"][0]["summary"] = "From yesterday's late edition: A concise supported report."
+    result = sports.publish_sports(request, review, settings, None, NOW, "America/Los_Angeles")
+    assert result["stories"][0]["publishedAt"] == "2026-09-08T20:00:00-07:00"

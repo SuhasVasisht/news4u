@@ -51,7 +51,10 @@ def test_only_optional_unmapped_story_holds_can_be_pruned():
     report.review.coverage[0].story_ids = ["a"]
     report.review.coverage[0].status = "covered"
     report.review.coverage[0].cause = "covered"
+    assert prunable_optional_ids(report, checklist) == ["a"]
+    checklist["events"][0]["mustCover"] = True
     assert prunable_optional_ids(report, checklist) == []
+    checklist["events"][0]["mustCover"] = False
     report.blockers.append("Edition-wide blocker")
     assert prunable_optional_ids(report, checklist) == []
 
