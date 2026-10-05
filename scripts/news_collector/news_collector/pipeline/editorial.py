@@ -227,7 +227,11 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
     with tempfile.TemporaryDirectory(prefix="news-editor-") as directory:
         root = Path(directory)
         schema = root / "schema.json"
-        schema.write_text(json.dumps(review_schema(result_type)))
+        contract = review_schema(result_type)
+        if result_type is ReviewBatch:
+            candidates = packets if isinstance(packets, list) else packets["packets"]
+            contract["$defs"]["Decision"]["properties"]["id"]["enum"] = [p["id"] for p in candidates]
+        schema.write_text(json.dumps(contract))
         result_path = root / "review.json"
         command = [executable, "exec", "--ignore-user-config", "--ephemeral",
                    "--skip-git-repo-check", "--sandbox", "read-only", "-C", directory,
@@ -285,7 +289,11 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
 def validate_decisions(reviewed, packets):
     known = {p["id"]: p for p in packets}
     if len(reviewed.decisions) != len(known) or {d.id for d in reviewed.decisions} != set(known):
-        raise ValueError("Review must decide every candidate exactly once")
+        actual = [d.id for d in reviewed.decisions]
+        raise ValueError("Review must decide every candidate exactly once; "
+                         f"missing={sorted(set(known) - set(actual))}; "
+                         f"unknown={sorted(set(actual) - set(known))}; "
+                         f"repeated={sorted(k for k, count in Counter(actual).items() if count > 1)}")
     for decision in reviewed.decisions:
         packet = known[decision.id]
         refs = {c["id"] for c in packet["chunks"]}
