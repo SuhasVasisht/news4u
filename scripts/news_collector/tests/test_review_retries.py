@@ -8,6 +8,29 @@ from news_collector.pipeline import editorial
 from test_editorial import packet, decision, row
 
 
+@pytest.mark.parametrize("recovers", [True, False])
+def test_selection_overlap_retried_but_never_accepted(tmp_path, monkeypatch, recovers):
+    calls = []
+    monkeypatch.setattr(editorial.shutil, "which", lambda _: "/bin/codex")
+    def run(command, **kwargs):
+        calls.append(kwargs["input"])
+        contract = json.loads(editorial.Path(command[command.index("--output-schema") + 1]).read_text())
+        assert contract["properties"]["selected_ids"]["items"]["enum"] == ["a"]
+        excluded = [] if recovers and len(calls) == 2 else [{"id": "a", "reason": "Selected"}]
+        editorial.Path(command[command.index("-o") + 1]).write_text(json.dumps({"selected_ids": ["a"], "excluded": excluded}))
+        return SimpleNamespace(returncode=0, stderr="")
+    monkeypatch.setattr(editorial.subprocess, "run", run)
+    prompt = tmp_path / "selection.md"
+    prompt.write_text("Select the complete edition")
+    if recovers:
+        assert editorial.codex_review({"shortlist": [{"id": "a"}]}, prompt, tmp_path, editorial.EditionSelection).selected_ids == ["a"]
+    else:
+        with pytest.raises(ValueError, match="must never appear in excluded"):
+            editorial.codex_review({"shortlist": [{"id": "a"}]}, prompt, tmp_path, editorial.EditionSelection)
+    assert len(calls) == 2
+    assert "Selected IDs must never appear in excluded" in calls[1]
+
+
 def test_candidate_ids_are_constrained_and_hash_confusion_gets_specific_feedback(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(editorial.shutil, "which", lambda _: "/bin/codex")

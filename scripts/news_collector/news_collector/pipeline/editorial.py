@@ -231,6 +231,10 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
         if result_type is ReviewBatch:
             candidates = packets if isinstance(packets, list) else packets["packets"]
             contract["$defs"]["Decision"]["properties"]["id"]["enum"] = [p["id"] for p in candidates]
+        elif result_type is EditionSelection and packets["shortlist"]:
+            ids = [p["id"] for p in packets["shortlist"]]
+            contract["properties"]["selected_ids"]["items"]["enum"] = ids
+            contract["$defs"]["SelectionRejection"]["properties"]["id"]["enum"] = ids
         schema.write_text(json.dumps(contract))
         result_path = root / "review.json"
         command = [executable, "exec", "--ignore-user-config", "--ephemeral",
@@ -276,6 +280,8 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
                 reviewed = result_type.model_validate_json(response)
                 if isinstance(reviewed, ReviewBatch):
                     validate_decisions(reviewed, packets if isinstance(packets, list) else packets["packets"])
+                elif isinstance(reviewed, EditionSelection):
+                    validate_selection(reviewed, packets["shortlist"])
                 return reviewed
             except ValueError as exc:
                 if attempt:
@@ -284,6 +290,16 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
                             + str(exc)[:400] + ". Regenerate a complete response for every input ID. "
                             "Hold evidence-ineligible items; never relax the stated requirements.")
                 print("Retrying review after output validation failed", flush=True)
+
+
+def validate_selection(selection, shortlist):
+    known = {s["id"] for s in shortlist}
+    accounted = selection.selected_ids + [s.id for s in selection.excluded]
+    if len(accounted) != len(set(accounted)) or set(accounted) != known or len(selection.selected_ids) > 28:
+        raise ValueError("Final editorial selection must account for each item once, maximum 28. "
+                         "Selected IDs must never appear in excluded, even with reason 'Selected'. "
+                         f"Missing IDs: {sorted(known - set(accounted))}; "
+                         f"unknown IDs: {sorted(set(accounted) - known)}")
 
 
 def validate_decisions(reviewed, packets):
@@ -447,10 +463,7 @@ def run_editorial(repository, settings, config, review_file=None, prepare_only=F
     else:
         print("Editorial desk: reviewing the complete proposed edition", flush=True)
         selection = codex_review({"shortlist": shortlist, "previouslyPublished": history}, selection_prompt, output, EditionSelection)
-    known = {s["id"] for s in shortlist}
-    accounted = selection.selected_ids + [s.id for s in selection.excluded]
-    if len(accounted) != len(set(accounted)) or set(accounted) != known or len(selection.selected_ids) > 28:
-        raise ValueError("Final editorial selection must account for each item once, maximum 28")
+    validate_selection(selection, shortlist)
     selection_path.write_text(selection.model_dump_json(indent=2))
     payload = {"policy": policy, "cutoff": now.isoformat(), "generatedAt": datetime.now(timezone.utc).isoformat(), "packets": packets,
                "selection": selection.model_dump(),
