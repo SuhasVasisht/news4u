@@ -32,7 +32,7 @@ async function codeRevision(root: string) {
     }
   }
   await walk("scripts"); await walk("src"); await walk("public");
-  return hash((await Promise.all(files.sort().map(async file => `${file}:${hash(await readFile(path.join(root, file)))}`))).join("\n") + (process.env.NEWS_EDITOR_MODEL || "default"));
+  return hash((await Promise.all(files.sort().map(async file => `${file}:${hash(await readFile(path.join(root, file)))}`))).join("\n") + (process.env.NEWS_EDITOR_MODEL || "default") + (process.env.NEWS_EDITOR_REASONING_EFFORT || "default"));
 }
 async function main() {
   const root = process.cwd();

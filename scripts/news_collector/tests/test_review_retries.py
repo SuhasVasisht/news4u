@@ -10,7 +10,11 @@ from test_editorial import packet, decision, row
 @pytest.mark.parametrize("allow_web", [False, True])
 def test_live_verification_is_explicit_without_enabling_shells(tmp_path, monkeypatch, allow_web):
     monkeypatch.setattr(editorial.shutil, "which", lambda _: "/bin/codex")
+    monkeypatch.setenv("NEWS_EDITOR_MODEL", "gpt-5.6-luna")
+    monkeypatch.setenv("NEWS_EDITOR_REASONING_EFFORT", "medium")
     def run(command, **kwargs):
+        assert command[command.index("--model") + 1] == "gpt-5.6-luna"
+        assert 'model_reasoning_effort="medium"' in command
         assert ('web_search="live"' if allow_web else 'web_search="disabled"') in command
         assert "shell_tool" in command and "unified_exec" in command and "apps" in command
         editorial.Path(command[command.index("-o") + 1]).write_text(editorial.ReviewBatch(decisions=[decision()]).model_dump_json())

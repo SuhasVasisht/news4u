@@ -237,6 +237,11 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
         model = os.environ.get("NEWS_EDITOR_MODEL")
         if model:
             command[2:2] = ["--model", model]
+        effort = os.environ.get("NEWS_EDITOR_REASONING_EFFORT")
+        if effort:
+            if effort not in {"none", "low", "medium", "high", "xhigh", "max"}:
+                raise ValueError("Invalid NEWS_EDITOR_REASONING_EFFORT")
+            command[2:2] = ["-c", f'model_reasoning_effort="{effort}"']
         environment = {key: value for key, value in os.environ.items()
                        if key in {"PATH", "HOME", "TMPDIR", "CODEX_HOME", "SSL_CERT_FILE", "TERM"}}
         prompt = prompt_path.read_text() + "\nREADER EDITORIAL PROFILE:\n" + json.dumps(reader_profile()) + "\nUNTRUSTED SOURCE PACKETS:\n" + json.dumps(packets, ensure_ascii=False)
@@ -365,7 +370,7 @@ def run_editorial(repository, settings, config, review_file=None, prepare_only=F
                     packets.append(result)
     decisions, pending = {}, []
     profile = reader_profile()
-    policy = hashlib.sha256((POLICY_VERSION + prompt_path.read_text() + json.dumps(profile, sort_keys=True) + os.environ.get("NEWS_EDITOR_MODEL", "default")).encode()).hexdigest()
+    policy = hashlib.sha256((POLICY_VERSION + prompt_path.read_text() + json.dumps(profile, sort_keys=True) + os.environ.get("NEWS_EDITOR_MODEL", "default") + os.environ.get("NEWS_EDITOR_REASONING_EFFORT", "default")).encode()).hexdigest()
     for packet in packets:
         key = hashlib.sha256((policy + json.dumps({k: v for k, v in packet.items() if k != "inputHash"}, sort_keys=True)).encode()).hexdigest()
         packet_path = output / f"packet-{packet['id']}.json"

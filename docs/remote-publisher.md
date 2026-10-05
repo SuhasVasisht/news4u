@@ -8,7 +8,8 @@ use a clean checkout at `~/news-publisher` and the user service in
 Install npm dependencies with `npm ci`; install uv 0.10.9 and run
 `uv sync --project scripts/news_collector --locked --extra dev`. Install Chromium
 for both Node and Python Playwright, including their Linux system dependencies.
-Store the publisher credentials and `NEWS_EDITOR_MODEL=gpt-5.6-luna` in the ignored,
+Store the publisher credentials, `NEWS_EDITOR_MODEL=gpt-5.6-luna`, and
+`NEWS_EDITOR_REASONING_EFFORT=medium` in the ignored,
 mode-0600 `~/news-publisher/.env`. Set `NEWS_EDITOR_CODEX_BIN` to the existing CLI's
 absolute path and `NEWS_BACKUP_DIR` outside the checkout. This service runs as the
 existing user, so its original Codex authentication is reused without copying tokens.
