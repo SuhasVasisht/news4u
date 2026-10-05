@@ -31,7 +31,9 @@ same evidence threshold and excluding sponsor material. This is an expressed rea
 preference, not automatic approval of every upload.
 
 The reader also follows ByteByteGo (source bytebytego), AlphaSignal (alphasignal),
-and TLDR Tech and AI (tldr_tech, tldr_ai). Favor substantive ByteByteGo engineering
+and TLDR Tech and AI (tldr_tech, tldr_ai). Their inbox equivalents are
+alphasignal_email and tldr_email; apply the same preferences and deduplication.
+Favor substantive ByteByteGo engineering
 essays, including occasional posts in the longform window. Select relevant AI and
 technology developments discovered through AlphaSignal and TLDR using the same
 evidence threshold. Their coverage may overlap each other and primary sources:

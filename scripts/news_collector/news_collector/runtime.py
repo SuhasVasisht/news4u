@@ -19,6 +19,7 @@ from news_collector.collectors.base import CollectorContext
 from news_collector.collectors.newsroom import NewsroomCollector
 from news_collector.collectors.dol_claims import DOLClaimsCollector
 from news_collector.collectors.alphasignal import AlphaSignalCollector
+from news_collector.collectors.newsletter_mail import NewsletterMailCollector
 from news_collector.config import load_config
 from news_collector.settings import get_settings
 from news_collector.storage.db import Database
@@ -27,6 +28,7 @@ from news_collector.storage.repository import Repository
 
 COLLECTOR_TYPES = {
     "dol_claims": DOLClaimsCollector,
+    "newsletter_mail": NewsletterMailCollector,
     "alphasignal": AlphaSignalCollector,
     "newsroom": NewsroomCollector,
     "rss": RSSCollector,

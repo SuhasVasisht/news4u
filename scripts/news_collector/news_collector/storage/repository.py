@@ -7,6 +7,7 @@ from typing import Any
 
 from news_collector.models import DigestDocument, NewsItem, RawItem, StoryCluster
 from news_collector.storage.db import Database
+from news_collector.utils import canonicalize_url
 
 
 def _as_iso(value: datetime | None) -> str | None:
@@ -124,7 +125,9 @@ class Repository:
                 """,
                 (f"-{limit_hours} hours",),
             ).fetchall()
-        return [dict(row) for row in rows]
+        # Apply current URL privacy rules to historical rows as well as new mail.
+        return [{**dict(row), "url": canonicalize_url(row["url"]),
+                 "canonical_url": canonicalize_url(row["canonical_url"])} for row in rows]
 
     def fetch_clusters(self) -> list[dict[str, Any]]:
         with self.db.connect() as conn:

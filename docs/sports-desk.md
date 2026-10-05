@@ -113,3 +113,12 @@ reading and desktop/390px/320px overflow checks. Actual-domain screenshots were
 visually inspected. All five static Playwright tests, 36 application tests and
 100 collector tests passed; TypeScript and lint checks passed. Runtime verification
 and screenshots are in `data/cloudflare-verification/news.suhasv.com/` (not Git).
+
+## September 10 late-edition carryover
+
+The reader explicitly authorized selective reuse from the very late September 9
+paper. A date-scoped allowlist in `config/sports-carryover.json` permits only the Mayfield and Amen
+Thompson contract reports on September 10. Their source evidence is reviewed again,
+original publication dates are retained, and summaries begin "From yesterday's late
+edition:". All other duplicate checks remain active. The exception expires after
+September 10; scores and standings are freshly collected for the new paper.

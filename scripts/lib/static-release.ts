@@ -4,10 +4,11 @@ import path from "node:path";
 import { editionSchema, validateBuildFreshness, type EditionData } from "../../src/lib/edition";
 import { archiveEdition, archiveIndex, embeddedEdition } from "./edition-archive";
 import { verifyDesignOnly } from "./design-only";
+import sportsCarryover from "../news_collector/config/sports-carryover.json";
 
 export const hash = (body: string | Buffer) => createHash("sha256").update(body).digest("hex");
 
-export function assertNewEdition(edition: EditionData, previous: EditionData) {
+export function assertNewEdition(edition: EditionData, previous: EditionData, carryover: { date: string | null; story_ids: string[] } = sportsCarryover) {
   if (previous.date >= edition.date) return;
   const canonical = (value: string) => {
     const url = new URL(value);
@@ -22,6 +23,18 @@ export function assertNewEdition(edition: EditionData, previous: EditionData) {
   const urls = new Set(previous.stories.flatMap(story => [story.url, ...story.coverage.map(item => item.url)]).map(canonical));
   for (const story of edition.stories) {
     if (ids.has(story.id) || urls.has(canonical(story.url))) {
+      const original = previous.stories.find(item => item.id === story.id);
+      const yesterday = new Date(`${edition.date}T12:00:00Z`);
+      yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+      const permittedCarryover = edition.date === carryover.date
+        && previous.date === yesterday.toISOString().slice(0, 10)
+        && carryover.story_ids.includes(story.id)
+        && original?.sector === "Sports" && story.sector === "Sports"
+        && !!original.sportsGroup && original.sportsGroup === story.sportsGroup
+        && canonical(original.url) === canonical(story.url)
+        && original.publishedAt === story.publishedAt
+        && story.summary.startsWith("From yesterday's late edition:");
+      if (permittedCarryover) continue;
       throw new Error(`Previously published story from ${previous.date}: ${story.title}. Re-run editorial review.`);
     }
   }

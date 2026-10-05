@@ -1,0 +1,18 @@
+name: Publisher checks
+on:
+  push:
+  pull_request:
+jobs:
+  linux-publisher:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the same image used on the VM
+        run: docker build -f Dockerfile.publisher -t news-app-publisher:ci .
+      - name: Test quality gates and runtime without production secrets
+        run: >-
+          docker run --rm --init --shm-size=1gb news-app-publisher:ci sh -c
+          'npm test && npm run test:collector && npm run lint && npx tsc --noEmit && npx tsx scripts/publisher-smoke.ts'

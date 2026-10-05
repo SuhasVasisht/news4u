@@ -1,0 +1,24 @@
+# Separate from the legacy Next/Postgres scheduler. This publishes the static site.
+services:
+  publisher:
+    build:
+      context: .
+      dockerfile: Dockerfile.publisher
+    image: news-app-publisher:local
+    init: true
+    env_file: ${NEWS_PUBLISHER_ENV_FILE:-/etc/news-publisher/publisher.env}
+    volumes:
+      - ${NEWS_PUBLISHER_STATE_DIR:-/var/lib/news-publisher}/data:/app/data
+      - ${NEWS_PUBLISHER_STATE_DIR:-/var/lib/news-publisher}/out:/app/out
+      - ${NEWS_PUBLISHER_STATE_DIR:-/var/lib/news-publisher}/collector-data:/app/scripts/news_collector/data
+      - ${NEWS_PUBLISHER_STATE_DIR:-/var/lib/news-publisher}/collector-output:/app/scripts/news_collector/output
+      - ${NEWS_PUBLISHER_STATE_DIR:-/var/lib/news-publisher}/codex:/state/codex
+      - ${NEWS_PUBLISHER_STATE_DIR:-/var/lib/news-publisher}/cache:/home/publisher/.cache
+      - ${NEWS_PUBLISHER_BACKUP_DIR:-/var/backups/news-publisher}:/backups
+    shm_size: 1gb
+    stop_grace_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "3"

@@ -1,0 +1,16 @@
+[Unit]
+Description=Collect, audit, build and publish the daily newspaper
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/news-app
+ExecStart=/usr/bin/docker compose -f compose.publisher.yml run --rm --name news-publisher-scheduled publisher
+ExecStopPost=-/usr/bin/docker stop -t 45 news-publisher-scheduled
+TimeoutStartSec=4h
+TimeoutStopSec=60s
+UMask=0077
+StandardOutput=journal
+StandardError=journal

@@ -163,6 +163,7 @@ def test_external_review_runs_without_calling_cli(tmp_path, monkeypatch):
     path.write_text(json.dumps({"requestHash": request["requestHash"], "reviewer": "Test desk",
                               "reviewedAt": current.isoformat(), "decisions": [decision().model_dump()],
                               "selection": {"selected_ids": ["one"], "excluded": []}}))
+    monkeypatch.setattr(editorial, "content_packet", unavailable)
     result = editorial.run_editorial(repository, settings, config, review_file=path)
     assert result["selection"]["selected_ids"] == ["one"]
     assert result["reviewProvenance"]["mode"] == "review-file"
@@ -252,3 +253,22 @@ def test_external_review_is_bound_to_sources_time_and_existing_quality_gates():
     payload["decisions"] = [decision(quality=20).model_dump()]
     with pytest.raises(ValueError, match="quality"):
         editorial.validate_external_review(payload, "request-hash", [packet()], NOW)
+
+
+def test_prepared_review_rejects_changed_source_records(tmp_path, monkeypatch):
+    from pathlib import Path
+    current = datetime.now(timezone.utc)
+    rows = [row(published_at=current.isoformat())]
+    settings = SimpleNamespace(project_root=tmp_path / "scripts/news_collector", user_agent="Test")
+    repository = SimpleNamespace(fetch_recent_items=lambda **kwargs: rows)
+    monkeypatch.setattr(editorial, "content_packet", lambda r, *_: {**packet(), "inputHash": source_hash(r)})
+    config = {"collectors": [{"name": "ars_technica"}]}
+    prepared = editorial.run_editorial(repository, settings, config, prepare_only=True)
+    request = json.loads(Path(prepared["request"]).read_text())
+    path = tmp_path / "desk.json"
+    path.write_text(json.dumps({"requestHash": request["requestHash"], "reviewer": "Test desk",
+        "reviewedAt": current.isoformat(), "decisions": [decision().model_dump()],
+        "selection": {"selected_ids": ["one"], "excluded": []}}))
+    rows[0]["summary"] = "Materially changed evidence"
+    with pytest.raises(ValueError, match="Source changed"):
+        editorial.run_editorial(repository, settings, config, review_file=path)

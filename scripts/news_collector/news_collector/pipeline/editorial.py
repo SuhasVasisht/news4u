@@ -347,12 +347,22 @@ def run_editorial(repository, settings, config, review_file=None, prepare_only=F
             return content_packet(row, repository, settings.user_agent)
         except Exception as exc:
             return {"failed_url": row["canonical_url"], "source": row["source"], "error": str(exc)[:200]}
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        for result in pool.map(prepare, candidates):
-            if "failed_url" in result:
-                excluded.append({"url": result["failed_url"], "source": result["source"], "reason": "content_unavailable", "detail": result["error"]})
-            else:
-                packets.append(result)
+    if review_file:
+        # Apply the evidence snapshot the desk actually reviewed. Re-fetching here
+        # made unrelated live pages change the hash midway through publication.
+        current = {row["canonical_url"]: row for row in candidates}
+        packets = prepared["packets"]
+        for packet in packets:
+            row = current.get(packet["url"])
+            if row is None or (packet.get("inputHash") and source_hash(row) != packet["inputHash"]):
+                raise ValueError("Source changed since review preparation; prepare and review again")
+    else:
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            for result in pool.map(prepare, candidates):
+                if "failed_url" in result:
+                    excluded.append({"url": result["failed_url"], "source": result["source"], "reason": "content_unavailable", "detail": result["error"]})
+                else:
+                    packets.append(result)
     decisions, pending = {}, []
     profile = reader_profile()
     policy = hashlib.sha256((POLICY_VERSION + prompt_path.read_text() + json.dumps(profile, sort_keys=True) + os.environ.get("NEWS_EDITOR_MODEL", "default")).encode()).hexdigest()

@@ -22,6 +22,8 @@ TRACKING_PARAMS = {
     "at_medium",
     "at_campaign",
     "rss",
+    "accesstoken",
+    "access_token",
 }
 
 TICKER_STOPWORDS = {

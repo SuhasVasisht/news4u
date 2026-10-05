@@ -73,9 +73,11 @@ def test_interrupted_request_does_not_reuse_an_older_response(tmp_path, monkeypa
     monkeypatch.setattr(quality_review, "discover_coverage", lambda *_: final["checklist"])
     monkeypatch.setattr(quality_review, "reconsider_announcements", lambda *_: None)
     monkeypatch.setattr(quality_review, "run_batched_audit", lambda *_: AuditReview.model_validate(final["envelope"]["review"]))
-    monkeypatch.setattr(quality_review, "datetime", type("Clock", (datetime,), {
+    clock = type("Clock", (datetime,), {
         "now": classmethod(lambda cls, tz=None: NOW),
-    }))
+    })
+    monkeypatch.setattr(quality_review, "datetime", clock)
+    monkeypatch.setattr("news_collector.pipeline.edition_audit.datetime", clock)
     assert quality_review.run_quality_review(tmp_path, review).status == "passed"
 
 
@@ -126,8 +128,13 @@ def test_automatic_recheck_is_bounded_and_never_bypasses_hold(tmp_path, monkeypa
         def now(cls, tz=None):
             return NOW
     monkeypatch.setattr(quality_review, "datetime", Clock)
+    monkeypatch.setattr("news_collector.pipeline.edition_audit.datetime", Clock)
     monkeypatch.setattr(quality_review, "load_history", lambda *_: [])
-    monkeypatch.setattr(quality_review, "discover_coverage", lambda *_: final["checklist"])
+    checklist_inputs = []
+    def coverage(output, cutoff, profile, source=None):
+        checklist_inputs.append(source)
+        return final["checklist"]
+    monkeypatch.setattr(quality_review, "discover_coverage", coverage)
     monkeypatch.setattr(quality_review, "reconsider_announcements", lambda *_: None)
     calls = []
     def audit(payload, prompt, output, result_type, *, allow_web=False):
@@ -150,3 +157,4 @@ def test_automatic_recheck_is_bounded_and_never_bypasses_hold(tmp_path, monkeypa
     assert len(calls) == 4
     assert [call["auditMode"] for call in calls] == [
         "story_claims", "coverage_reconciliation", "story_claims", "coverage_reconciliation"]
+    assert checklist_inputs == [None, tmp_path / "data/editorial/checklist.json"]

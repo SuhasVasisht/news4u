@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { assertNewEdition, assertPublicFile, prepareRelease, publicFile, releaseFiles, retainPublishedRelease } from "../scripts/lib/static-release";
 import { archiveEdition } from "../scripts/lib/edition-archive";
-import { dateInZone } from "../src/lib/edition";
+import { dateInZone, type EditionData } from "../src/lib/edition";
+
+const sportsCarryover = { date: "2026-09-10", story_ids: ["abcdef0123456789abcd"] };
 
 describe("Cloudflare static release", () => {
   it("allows reader artifacts only, never runtime files, screenshots, or functions", () => {
@@ -15,6 +17,30 @@ describe("Cloudflare static release", () => {
   it("rejects credentials and files exceeding the free upload limit", () => {
     expect(() => assertPublicFile("index.html", Buffer.from("secret-token-value"), ["secret-token-value"])).toThrow("Credential");
     expect(() => assertPublicFile("index.html", Buffer.alloc(25 * 1024 * 1024 + 1), [])).toThrow("limit");
+  });
+
+  it("permits only the dated, labeled sports carryover and preserves its original timestamp", () => {
+    const assertWithCarryover = (edition: EditionData, previous: EditionData) => assertNewEdition(edition, previous, sportsCarryover);
+    const carryDate = sportsCarryover.date;
+    const allowedId = sportsCarryover.story_ids[0];
+    const prevDate = new Date(`${carryDate}T12:00:00Z`);
+    prevDate.setUTCDate(prevDate.getUTCDate() - 1);
+    const prevDateStr = prevDate.toISOString().slice(0, 10);
+    const story = { id: allowedId, title: "Contract report", summary: "Original report",
+      sector: "Sports", sportsGroup: "NFL" as const, url: "https://example.com/contract", image: null,
+      publishedAt: `${prevDateStr}T20:43:46-05:00`, score: 8, publisher: "Example", collectors: [], coverage: [] };
+    const previous: EditionData = { date: prevDateStr, generatedAt: `${carryDate}T04:00:00Z`,
+      timezone: "America/Los_Angeles", windowHours: 48, sources: [], stories: [story] };
+    const current: EditionData = { ...previous, date: carryDate, stories: [{ ...story,
+      summary: "From yesterday's late edition: A major contract remains relevant." }] };
+    expect(() => assertWithCarryover(current, previous)).not.toThrow();
+    const nextDay = new Date(`${carryDate}T12:00:00Z`);
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+    expect(() => assertWithCarryover({ ...current, date: nextDay.toISOString().slice(0, 10) }, previous)).toThrow("Previously published");
+    for (const changes of [{ summary: "Unlabeled repeat" }, { publishedAt: `${carryDate}T12:00:00Z` },
+      { sector: "Technology" }, { id: "11111111111111111111" }]) {
+      expect(() => assertWithCarryover({ ...current, stories: [{ ...current.stories[0], ...changes }] }, previous)).toThrow("Previously published");
+    }
   });
 
   it("stages only a matching reviewed edition and preserves previously staged reports", async () => {

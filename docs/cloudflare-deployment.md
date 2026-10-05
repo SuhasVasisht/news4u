@@ -1,5 +1,7 @@
 # Cloudflare Static Publishing
 
+For unattended daily publishing on a VM, use the [remote publisher setup](remote-publisher.md). The legacy sync scheduler does not publish the static newspaper.
+
 Project: `news4u-suhasv`. Live domain: `https://news.suhasv.com`.
 Pages URL: `https://news4u-suhasv.pages.dev`.
 
@@ -245,3 +247,31 @@ production deployment. Keep DNS pointed at Pages; normal rollback does not requi
 tunnel. An emergency DNS restoration can use the saved original CNAME only if the old
 tunnel and origin are actually working. A failed post-deployment verification is reported
 as failure; the script does not silently claim success or change DNS back to a dead origin.
+
+### September 10 reviewed edition
+
+The local collection ran on September 10 and inserted 398 new records across 42
+source runs. The interactive desk screened 331 evidence packets and selected 24
+main stories, with six additional sports briefs. Six main stories have TLDR or
+AlphaSignal email provenance. The Mayfield and Thompson sports briefs explicitly
+carry forward the previous late edition under the one-date policy in
+`scripts/news_collector/config/sports-carryover.json`; their dates stay unchanged.
+
+Review-file application now uses the prepared evidence snapshot instead of fetching
+live pages a second time. It still checks source record hashes, current candidate
+eligibility, editorial policy, publication history, date and review age. A changing
+unselected live page can no longer invalidate an otherwise matching review. The
+release stage independently enforces the same date-limited sports allowlist, original
+publication timestamps and visible carryover label. Ordinary repeated stories are
+still rejected. Tests cover both the exception and its expiry.
+
+Local validation: 40 application tests, 106 collector tests, lint and TypeScript
+passed. The rendered paper matched the reviewed decisions and contained no mailbox
+credentials. Cloudflare's standard local and hosted browser checks verify all reports,
+archived editions, scores, mobile layouts, no-JavaScript reading and private-path 404s.
+
+Published at https://news.suhasv.com/ and verified on the actual domain at
+08:43 PDT on September 10. Deployment: https://18d7a246.news4u-suhasv.pages.dev.
+All 30 report pages, 30 images and the September 8–10 archives passed hosted
+verification with no browser errors. The transient initial Pages routing/propagation
+failures cleared on retry. Desktop and mobile screenshots were visually inspected.

@@ -24,6 +24,8 @@ trust_scores:
   tldr_ai: 0.72
   bytebytego: 0.8
   alphasignal: 0.72
+  alphasignal_email: 0.72
+  tldr_email: 0.72
   gdelt: 0.6
   alphavantage_news: 0.7
   alphavantage_movers: 0.82
@@ -90,6 +92,24 @@ collectors:
     url: https://www.hawley.senate.gov/feed/
     limit: 4
     editorial_limit: 2
+  - name: tldr_email
+    type: newsletter_mail
+    enabled: true
+    enabled_env: NEWS_MAIL_ENABLED
+    category: tech
+    editorial_limit: 32
+    sender_domains: [tldr.tech, tldrnewsletter.com]
+    max_messages_per_run: 20
+    lookback_days: 30
+  - name: alphasignal_email
+    type: newsletter_mail
+    enabled: true
+    enabled_env: NEWS_MAIL_ENABLED
+    category: tech
+    editorial_limit: 16
+    sender_domains: [alphasignal.ai]
+    max_messages_per_run: 20
+    lookback_days: 30
   - name: techcrunch
     type: rss
     enabled: true
@@ -160,7 +180,8 @@ collectors:
     category: finance
   - name: tldr_tech
     type: tldr
-    enabled: true
+    # Retained as a manual fallback; daily Tech and AI now arrive by email.
+    enabled: false
     category: tech
     unofficial: true
     newsletter: tech
@@ -171,7 +192,8 @@ collectors:
     editorial_limit: 16
   - name: tldr_ai
     type: tldr
-    enabled: true
+    # Retained as a manual fallback; daily Tech and AI now arrive by email.
+    enabled: false
     category: tech
     unofficial: true
     newsletter: ai

@@ -21,8 +21,10 @@ def public_url(url):
     return url
 
 
-def download(client, url, limit):
+def download(client, url, limit, *, validate_url=None):
     for _ in range(5):
+        if validate_url:
+            validate_url(url)
         with client.stream("GET", public_url(url)) as response:
             if response.is_redirect:
                 url = str(response.url.join(response.headers["location"]))

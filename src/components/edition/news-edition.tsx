@@ -7,7 +7,7 @@ import { SportsSection } from "./sports-section";
 import { ThemePicker } from "./theme-picker";
 import { NewsMark } from "./news-mark";
 
-const discoveryNames: Record<string, string> = { tldr_tech: "TLDR Tech", tldr_ai: "TLDR AI", hackernews: "Hacker News", techmeme: "Techmeme", alphasignal: "AlphaSignal" };
+const discoveryNames: Record<string, string> = { tldr_tech: "TLDR Tech", tldr_ai: "TLDR AI", tldr_email: "TLDR Newsletter", alphasignal_email: "AlphaSignal Newsletter", hackernews: "Hacker News", techmeme: "Techmeme", alphasignal: "AlphaSignal" };
 const sectors = ["Technology", "AI", "Markets", "Economy", "Deals & regulation", "World", "Policy", "Science & health", "Reading room", "Listening room", "Other", "Sports"];
 
 function Picture({ story, small = false }: { story: EditionStory; small?: boolean }) {

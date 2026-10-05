@@ -251,7 +251,9 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
     atomic_json(root / "data/quality/history" / f"{date}-{request['requestHash']}.json", payload)
     if report.status == "blocked" and not audit_file and _repair_attempt == 0:
         print("Final audit blocked publication; attempting one bounded repair and recheck", flush=True)
-        return run_quality_review(root, review, checklist_file, _repair_attempt=1)
+        # Reuse the exact checklist that produced this audit. Rediscovering coverage
+        # during a repair can move the goalposts and waste a second research pass.
+        return run_quality_review(root, review, output / "checklist.json", _repair_attempt=1)
     require_publishable(report)
     review["finalAudit"] = {"checklist": checklist, "envelope": envelope}
     atomic_json(output / "latest.json", review)

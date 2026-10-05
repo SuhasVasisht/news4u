@@ -1,5 +1,6 @@
+import { publisherStdio } from "./lib/publisher-stdio";
 import { loadEnvFile } from "node:process";
-import { readFile, writeFile, mkdir, open, unlink } from "node:fs/promises";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { prepareRelease, retainPublishedRelease } from "./lib/static-release";
@@ -19,9 +20,7 @@ async function main() {
   const config = JSON.parse(await readFile(path.join(root, "cloudflare-pages.json"), "utf8")) as { project: string; domain: string; zone: string; productionBranch: string };
   if (!/^[a-z0-9-]+$/.test(config.project) || !config.domain.endsWith(`.${config.zone}`)) throw new Error("Invalid Cloudflare project/domain configuration");
   await mkdir(path.join(root, "data"), { recursive: true });
-  const lockPath = path.join(root, "data/cloudflare-deploy.lock");
-  const lock = await open(lockPath, "wx");
-  try {
+  {
     async function api<T>(route: string, method = "GET", body?: unknown): Promise<T> {
       const response = await fetch(`https://api.cloudflare.com/client/v4${route}`, {
         method, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -47,7 +46,7 @@ async function main() {
       console.log(`Deploying ${manifest.stories} stories for ${manifest.date} to ${config.project}`);
       execFileSync(process.execPath, [path.join(root, "node_modules/wrangler/bin/wrangler.js"), "pages", "deploy", bundle,
         "--project-name", config.project, "--branch", config.productionBranch, "--commit-dirty=true"], {
-        cwd: bundle, stdio: "inherit", timeout: 600000,
+        cwd: bundle, stdio: publisherStdio(), timeout: 600000,
         env: { NODE_ENV: "production", PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR,
           CLOUDFLARE_API_TOKEN: token, CLOUDFLARE_ACCOUNT_ID: account, CLOUDFLARE_SEND_METRICS: "false", CI: "true" },
       });
@@ -88,7 +87,7 @@ async function main() {
     await retainPublishedRelease(root);
     await backupRelease(root, "published");
     console.log(process.argv.includes("--pages-only") ? `Pages verified: ${pagesUrl}. Custom domain still pending.` : `Deployment verified: https://${config.domain}`);
-  } finally { await lock.close(); await unlink(lockPath); }
+  }
 }
 
 main().catch(error => { console.error(error.message); process.exitCode = 1; });

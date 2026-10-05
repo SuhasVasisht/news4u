@@ -224,6 +224,9 @@ class BaseCollector:
     def collect(self) -> list[RawItem]:
         raise NotImplementedError
 
+    def acknowledge(self) -> None:
+        """Commit source progress only after the job has persisted every returned item."""
+
     def resolve_image(
         self,
         item_url: str,

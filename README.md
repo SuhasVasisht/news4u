@@ -1,5 +1,7 @@
 # News App
 
+For unattended daily publishing on a VM, use the [remote publisher setup](docs/remote-publisher.md). The legacy sync scheduler does not publish the static newspaper.
+
 ## Shared Spreads Reader And Static Daily Edition
 
 The reader now uses the neutral Shared Spreads design. Run `npm run build:daily` to collect current sources and create `out/index.html`, or `npm run build:static` to rebuild an already-current snapshot. The same React reader powers the Next.js app and the standalone HTML.

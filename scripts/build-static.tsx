@@ -1,7 +1,8 @@
+import { publisherStdio } from "./lib/publisher-stdio";
 import { build } from "esbuild";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
-import { readFile, writeFile, mkdir, rename, open, unlink, chmod } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename, chmod } from "node:fs/promises";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -13,8 +14,7 @@ import { themeBootstrap } from "../src/lib/edition-themes";
 
 async function main() {
   await mkdir("data", { recursive: true });
-  const lock = await open("data/static-build.lock", "wx").catch(() => { throw new Error("Another static build is running (data/static-build.lock)."); });
-  try {
+  {
     const designOnly = process.argv.includes("--design-only");
     const dateIndex = process.argv.indexOf("--edition-date");
     const editionDate = dateIndex >= 0 ? process.argv[dateIndex + 1] : undefined;
@@ -32,19 +32,19 @@ async function main() {
       const configuredPython = process.env.PYTHON_BIN;
       const python = configuredPython ? configuredPython.includes("/") ? path.resolve(configuredPython) : configuredPython : path.join(cwd, ".venv/bin/python");
       if (prepareSports || sportsFile) {
-        execFileSync(python, ["-m", "news_collector.jobs.sports", ...(prepareSports ? ["--prepare-review"] : ["--review-file", path.resolve(sportsFile!)])], { cwd, stdio: "inherit", timeout: 30 * 60_000 });
+        execFileSync(python, ["-m", "news_collector.jobs.sports", ...(prepareSports ? ["--prepare-review"] : ["--review-file", path.resolve(sportsFile!)])], { cwd, stdio: publisherStdio(), timeout: 30 * 60_000 });
         if (prepareSports) return;
       }
       if (process.argv.includes("--collect")) {
-        const result = execFileSync(python, ["-m", "news_collector.jobs.collect"], { cwd, encoding: "utf8", timeout: 20 * 60_000, maxBuffer: 10 * 1024 * 1024 });
+        const result = execFileSync(python, ["-m", "news_collector.jobs.collect"], { cwd, stdio: publisherStdio("pipe"), encoding: "utf8", timeout: 20 * 60_000, maxBuffer: 10 * 1024 * 1024 });
         await writeFile("data/collection-run.json", result);
         console.log(result);
       }
       const reviewArgs = process.argv.includes("--prepare-review") ? ["--prepare-review"] : reviewFile ? ["--review-file", path.resolve(reviewFile)] : [];
-      if (!sportsFile) execFileSync(python, ["-m", "news_collector.jobs.editorial", ...reviewArgs], { cwd, stdio: "inherit", timeout: 90 * 60_000 });
+      if (!sportsFile) execFileSync(python, ["-m", "news_collector.jobs.editorial", ...reviewArgs], { cwd, stdio: publisherStdio(), timeout: 90 * 60_000 });
       if (process.argv.includes("--prepare-review")) { console.log("Review request prepared. No new paper was published."); return; }
-      if (process.argv.includes("--collect")) execFileSync(python, ["-m", "news_collector.jobs.sports"], { cwd, stdio: "inherit", timeout: 30 * 60_000 });
-      execFileSync(python, ["-m", "news_collector.jobs.export_edition", ...(editionDate ? ["--edition-date", editionDate] : [])], { cwd, stdio: "inherit", timeout: 60_000 });
+      if (process.argv.includes("--collect")) execFileSync(python, ["-m", "news_collector.jobs.sports"], { cwd, stdio: publisherStdio(), timeout: 30 * 60_000 });
+      execFileSync(python, ["-m", "news_collector.jobs.export_edition", ...(editionDate ? ["--edition-date", editionDate] : [])], { cwd, stdio: publisherStdio(), timeout: 60_000 });
     }
     const edition = editionSchema.parse(JSON.parse(await readFile("data/edition.json", "utf8")));
     const today = designOnly ? await verifyDesignOnly(process.cwd(), edition) : validateBuildFreshness(edition, new Date(), editionDate);
@@ -86,6 +86,6 @@ async function main() {
     await rename("out/reader-assets.json.tmp", "out/reader-assets.json");
     await rename("out/index.html.tmp", "out/index.html");
     console.log(JSON.stringify(review, null, 2));
-  } finally { await lock.close(); await unlink("data/static-build.lock"); }
+  }
 }
 main().catch(error => { console.error(error instanceof Error ? error.message : error); process.exitCode = 1; });

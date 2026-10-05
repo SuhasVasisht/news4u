@@ -5,15 +5,15 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:static": "tsx scripts/build-static.tsx",
-    "build:daily": "tsx scripts/build-static.tsx --collect",
-    "review:prepare": "tsx scripts/build-static.tsx --collect --prepare-review",
-    "review:apply": "tsx scripts/build-static.tsx --review-file",
-    "sports:prepare": "tsx scripts/build-static.tsx --prepare-sports",
-    "sports:apply": "tsx scripts/build-static.tsx --sports-review-file",
-    "deploy:static": "tsx scripts/deploy-cloudflare.ts",
+    "build:static": "python3 scripts/with-publisher-lock.py node --import tsx scripts/build-static.tsx",
+    "build:daily": "python3 scripts/with-publisher-lock.py node --import tsx scripts/build-static.tsx --collect",
+    "review:prepare": "python3 scripts/with-publisher-lock.py node --import tsx scripts/build-static.tsx --collect --prepare-review",
+    "review:apply": "python3 scripts/with-publisher-lock.py node --import tsx scripts/build-static.tsx --review-file",
+    "sports:prepare": "python3 scripts/with-publisher-lock.py node --import tsx scripts/build-static.tsx --prepare-sports",
+    "sports:apply": "python3 scripts/with-publisher-lock.py node --import tsx scripts/build-static.tsx --sports-review-file",
+    "deploy:static": "python3 scripts/with-publisher-lock.py node --import tsx scripts/deploy-cloudflare.ts",
     "verify:deployed": "tsx scripts/verify-static-site.ts",
-    "publish:daily": "npm test && npm run test:collector && npm run build:daily && npm run deploy:static",
+    "publish:daily": "python3 scripts/with-publisher-lock.py node --import tsx scripts/publish-daily.ts",
     "publish:static": "npm test && npm run build:static && npm run deploy:static",
     "start": "next start",
     "lint": "eslint src tests scripts *.config.ts *.config.mjs",
@@ -27,7 +27,8 @@
     "startup:catchup": "tsx scripts/startup-catchup.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
-    "db:seed": "tsx scripts/seed.ts"
+    "db:seed": "tsx scripts/seed.ts",
+    "publish:check": "python3 scripts/with-publisher-lock.py node --import tsx scripts/publish-daily.ts --check"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.2",

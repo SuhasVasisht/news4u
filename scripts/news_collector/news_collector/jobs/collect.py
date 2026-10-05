@@ -63,6 +63,8 @@ def main() -> None:
                     "symbols_json": json.dumps(normalized.symbols),
                 }
             )
+        if result.status in {"ok", "partial"}:
+            collector.acknowledge()
         source_results.append(
             {
                 "collector": collector.name,
