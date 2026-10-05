@@ -6,7 +6,8 @@ import path from "node:path";
 import { dateInZone, editionSchema, validateBuildFreshness } from "../src/lib/edition";
 import { atomicJson, readJson, reusable, runStages, type RunState, type Stage } from "./lib/daily-publisher";
 import { fetchPublic, restorePublication } from "./lib/restore-publication";
-import { hash, releaseFiles } from "./lib/static-release";
+import { hash, releaseFiles, prepareRelease } from "./lib/static-release";
+import { verifyLocalRelease } from "./lib/verify-local-release";
 
 async function checkpointArtifacts(state: RunState) {
   const files: string[] = [];
@@ -36,6 +37,7 @@ async function codeRevision(root: string) {
 }
 async function main() {
   const root = process.cwd();
+  const noUpload = process.argv.includes("--no-upload");
   for (const file of [".env", ".env.newsletters"]) {
     try { loadEnvFile(path.join(root, file)); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
@@ -99,13 +101,18 @@ async function main() {
         validateBuildFreshness(edition);
         if (edition.date !== date) throw new Error("Generated edition does not match the run date");
         if (hash(await fetchPublic(`https://${config.domain}/edition-manifest.json`)) !== state.history) throw new Error("Production changed during this run; retry to refresh publication history");
-        script("scripts/deploy-cloudflare.ts", [], 30 * 60_000);
+        if (noUpload) {
+          const secrets = Object.entries(process.env).filter(([key]) => /KEY|TOKEN|SECRET|PASSWORD/i.test(key)).flatMap(([, value]) => value ? [value] : []);
+          const { bundle } = await prepareRelease(root, secrets);
+          await verifyLocalRelease(root, bundle);
+          console.log("Full rehearsal passed local release verification. Nothing was uploaded.");
+        } else script("scripts/deploy-cloudflare.ts", [], 30 * 60_000);
       }
     }, async state => {
       state.artifacts = await checkpointArtifacts(state);
       await atomicJson(file, state);
       await atomicJson(statusFile, { date, status: state.status, stage: state.active, checkedAt: new Date().toISOString() });
-    }, today);
+    }, today, { noUpload });
   } catch (error) {
     // Detailed errors go to the private journal. Keep the health file credential-free.
     await atomicJson(statusFile, { date, status: "failed", checkedAt: new Date().toISOString(), detail: "See publisher journal and publisher-state.json" });

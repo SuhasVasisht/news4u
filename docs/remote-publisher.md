@@ -29,9 +29,10 @@ timer; use either this native service or the Docker service below. Stop the lega
 `news-app-scheduler-1` container when transferring scheduling ownership, without stopping
 its unrelated web/database services. Disable its restart policy to keep it stopped
 after reboot. Test Codex, mailbox and Cloudflare access under the service user before
-activation. `npm run build:daily` provides a real collection/review/build rehearsal
-without uploading; load `.env` through the service's `EnvironmentFile` for that rehearsal
-and restore public history first. Keep normal final audit and local release checks.
+activation. `npm run publish:rehearse` runs the same checkpointed collection, editorial audit, sports,
+export, build and local browser verification without uploading. It loads `.env` and
+restores public history automatically. Its final status is `validated`, never
+`published`; a later real run still must execute deployment.
 
 To defer the first publication, add a user-service drop-in with an `ExecCondition`
 checking the start date in America/Los_Angeles. For example, the following prevents
@@ -126,7 +127,9 @@ should own daily scheduling; stop the laptop/legacy scheduler when moving to the
 - Atomic checkpoints resume successful phases within six hours of collection. A new
   local date, changed code/profile/model, changed publication history, or missing/changed
   checkpoint artifacts starts fresh. Normal retries preserve the review's own evidence
-  caches. No retry weakens an audit or silently substitutes hand-edited JSON.
+  caches. Transient model-capacity errors get two bounded retries with the same model before
+  failing for the next timer attempt. No retry weakens an audit, switches models, or
+  silently substitutes hand-edited JSON.
 - A run crossing midnight stops before its next phase. It never manufactures editions
   for missed days. The next run collects for the current day.
 - The live manifest is checked before collection and again before upload. An already

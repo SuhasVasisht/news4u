@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from typing import Literal
 from urllib.parse import urlparse, parse_qs
 
@@ -251,8 +252,18 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
         feedback = ""
         for attempt in range(2):
             result_path.unlink(missing_ok=True)
-            run = subprocess.run(command, input=prompt + feedback, text=True, capture_output=True, env=environment,
-                                 timeout=600)
+            for transport_attempt in range(3):
+                result_path.unlink(missing_ok=True)
+                run = subprocess.run(command, input=prompt + feedback, text=True, capture_output=True, env=environment,
+                                     timeout=600)
+                transient = run.returncode and re.search(
+                    r"^ERROR:.*(?:at capacity|rate limit|temporarily unavailable|overloaded)",
+                    run.stderr[-2000:], flags=re.I | re.M)
+                if not transient or transport_attempt == 2:
+                    break
+                delay = 20 * (transport_attempt + 1)
+                print(f"Editor temporarily unavailable; retrying the same model in {delay}s", flush=True)
+                time.sleep(delay)
             if run.returncode or not result_path.exists():
                 raise RuntimeError(f"Editorial review failed (exit {run.returncode}); previous paper retained. {run.stderr[-400:]}")
             response = result_path.read_text()

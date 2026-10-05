@@ -28,7 +28,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed.ts",
-    "publish:check": "python3 scripts/with-publisher-lock.py node --import tsx scripts/publish-daily.ts --check"
+    "publish:check": "python3 scripts/with-publisher-lock.py node --import tsx scripts/publish-daily.ts --check",
+    "publish:rehearse": "python3 scripts/with-publisher-lock.py node --import tsx scripts/publish-daily.ts --no-upload"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.2",

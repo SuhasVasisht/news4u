@@ -7,6 +7,40 @@ from news_collector.pipeline import editorial
 from test_editorial import packet, decision, row
 
 
+def test_capacity_retries_same_model_without_relaxing_validation(tmp_path, monkeypatch):
+    calls, delays = [], []
+    monkeypatch.setattr(editorial.shutil, "which", lambda _: "/bin/codex")
+    monkeypatch.setattr(editorial.time, "sleep", delays.append)
+    def run(command, **kwargs):
+        calls.append(command.copy())
+        if len(calls) == 1:
+            return SimpleNamespace(returncode=1, stderr="ERROR: Selected model is at capacity.")
+        editorial.Path(command[command.index("-o") + 1]).write_text(editorial.ReviewBatch(decisions=[decision()]).model_dump_json())
+        return SimpleNamespace(returncode=0, stderr="")
+    monkeypatch.setattr(editorial.subprocess, "run", run)
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("Review the evidence")
+    assert editorial.codex_review([packet()], prompt, tmp_path).decisions
+    assert len(calls) == 2 and calls[0] == calls[1]
+    assert delays == [20]
+
+
+@pytest.mark.parametrize("error, attempts", [("ERROR: Selected model is at capacity.", 3), ("ERROR: Authentication failed.", 1)])
+def test_capacity_retries_are_bounded_and_auth_errors_are_not_retried(tmp_path, monkeypatch, error, attempts):
+    calls = []
+    monkeypatch.setattr(editorial.shutil, "which", lambda _: "/bin/codex")
+    monkeypatch.setattr(editorial.time, "sleep", lambda _: None)
+    def run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=1, stderr=error)
+    monkeypatch.setattr(editorial.subprocess, "run", run)
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("Review the evidence")
+    with pytest.raises(RuntimeError, match="previous paper retained"):
+        editorial.codex_review([packet()], prompt, tmp_path)
+    assert len(calls) == attempts
+
+
 @pytest.mark.parametrize("allow_web", [False, True])
 def test_live_verification_is_explicit_without_enabling_shells(tmp_path, monkeypatch, allow_web):
     monkeypatch.setattr(editorial.shutil, "which", lambda _: "/bin/codex")
