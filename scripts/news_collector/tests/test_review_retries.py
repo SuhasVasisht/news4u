@@ -14,7 +14,7 @@ def test_selection_mapping_preserves_exclusions_and_enforces_edition_limit(tmp_p
     entries = {str(i): {"selected": True, "reason": "Important"} for i in range(count)}
     entries["held"] = {"selected": False, "reason": "Lower priority"}
     def run(command, **kwargs):
-        editorial.Path(command[command.index("-o") + 1]).write_text(json.dumps({"candidates": entries}))
+        editorial.Path(command[command.index("-o") + 1]).write_text(json.dumps({"selected_ids": [id for id, entry in entries.items() if entry["selected"]], "reasons": {id: entry["reason"] for id, entry in entries.items()}}))
         return SimpleNamespace(returncode=0, stderr="")
     monkeypatch.setattr(editorial.subprocess, "run", run)
     prompt = tmp_path / "selection.md"
@@ -36,9 +36,9 @@ def test_selection_requires_every_candidate_and_retries_omissions(tmp_path, monk
     def run(command, **kwargs):
         calls.append(kwargs["input"])
         contract = json.loads(editorial.Path(command[command.index("--output-schema") + 1]).read_text())
-        assert contract["properties"]["candidates"]["required"] == ["a"]
+        assert contract["properties"]["reasons"]["required"] == ["a"]
         entries = {"a": {"selected": True, "reason": "Important"}} if recovers and len(calls) == 2 else {}
-        editorial.Path(command[command.index("-o") + 1]).write_text(json.dumps({"candidates": entries}))
+        editorial.Path(command[command.index("-o") + 1]).write_text(json.dumps({"selected_ids": [id for id, entry in entries.items() if entry["selected"]], "reasons": {id: entry["reason"] for id, entry in entries.items()}}))
         return SimpleNamespace(returncode=0, stderr="")
     monkeypatch.setattr(editorial.subprocess, "run", run)
     prompt = tmp_path / "selection.md"

@@ -233,13 +233,13 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
             contract["$defs"]["Decision"]["properties"]["id"]["enum"] = [p["id"] for p in candidates]
         elif result_type is EditionSelection:
             ids = [p["id"] for p in packets["shortlist"]]
-            entry = {"type": "object", "additionalProperties": False,
-                     "properties": {"selected": {"type": "boolean"}, "reason": {"type": "string"}},
-                     "required": ["selected", "reason"]}
             contract = {"type": "object", "additionalProperties": False,
-                        "properties": {"candidates": {"type": "object", "additionalProperties": False,
-                                       "properties": {id: entry for id in ids}, "required": ids}},
-                        "required": ["candidates"]}
+                        "properties": {
+                            "selected_ids": {"type": "array", "maxItems": 28,
+                                             "items": {"type": "string", **({"enum": ids} if ids else {})}},
+                            "reasons": {"type": "object", "additionalProperties": False,
+                                        "properties": {id: {"type": "string"} for id in ids}, "required": ids}},
+                        "required": ["selected_ids", "reasons"]}
         schema.write_text(json.dumps(contract))
         result_path = root / "review.json"
         command = [executable, "exec", "--ignore-user-config", "--ephemeral",
@@ -260,10 +260,9 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
                        if key in {"PATH", "HOME", "TMPDIR", "CODEX_HOME", "SSL_CERT_FILE", "TERM"}}
         prompt = prompt_path.read_text() + "\nREADER EDITORIAL PROFILE:\n" + json.dumps(reader_profile()) + "\nUNTRUSTED SOURCE PACKETS:\n" + json.dumps(packets, ensure_ascii=False)
         if result_type is EditionSelection:
-            prompt += ("\nOUTPUT FORMAT: Return the schema's candidates object with exactly one entry for every shortlist ID. "
-                       "Set selected=true for at most 28 stories and selected=false for all others. "
-                       "Give each entry its editorial reason. Do not return selected_ids or excluded arrays; "
-                       "the application derives those from these decisions.")
+            prompt += ("\nOUTPUT FORMAT: Return selected_ids with at most 28 unique shortlist IDs, "
+                       "plus a reasons object containing an editorial reason for EVERY shortlist ID, selected or excluded. "
+                       "Do not return an excluded array; the application derives it from IDs absent from selected_ids.")
         response_dir = Path(output_dir) / "responses"
         response_dir.mkdir(parents=True, exist_ok=True)
         key = hashlib.sha256((prompt + schema.read_text()).encode()).hexdigest()
@@ -289,15 +288,17 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
             try:
                 if result_type is EditionSelection:
                     raw = json.loads(response)
-                    entries = raw.get("candidates") if isinstance(raw, dict) else None
-                    if not isinstance(entries, dict) or set(entries) != {p["id"] for p in packets["shortlist"]}:
+                    reasons = raw.get("reasons") if isinstance(raw, dict) else None
+                    if not isinstance(reasons, dict) or set(reasons) != {p["id"] for p in packets["shortlist"]}:
                         raise ValueError("Selection must contain exactly every shortlist ID")
-                    if any(not isinstance(entry, dict) or type(entry.get("selected")) is not bool or not isinstance(entry.get("reason"), str)
-                           for entry in entries.values()):
-                        raise ValueError("Each selection requires a boolean selected and a reason")
+                    if any(not isinstance(reason, str) for reason in reasons.values()):
+                        raise ValueError("Each selection requires an editorial reason")
+                    selected = raw.get("selected_ids")
+                    if not isinstance(selected, list) or any(not isinstance(id, str) for id in selected):
+                        raise ValueError("Selection requires a selected_ids list")
                     reviewed = result_type.model_validate({
-                        "selected_ids": [id for id, entry in entries.items() if entry["selected"]],
-                        "excluded": [{"id": id, "reason": entry["reason"]} for id, entry in entries.items() if not entry["selected"]]})
+                        "selected_ids": selected,
+                        "excluded": [{"id": id, "reason": reason} for id, reason in reasons.items() if id not in selected]})
                 else:
                     reviewed = result_type.model_validate_json(response)
                 if isinstance(reviewed, ReviewBatch):
