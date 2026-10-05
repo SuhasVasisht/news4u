@@ -8,16 +8,37 @@ from news_collector.pipeline import editorial
 from test_editorial import packet, decision, row
 
 
+@pytest.mark.parametrize("count", [1, 29])
+def test_selection_mapping_preserves_exclusions_and_enforces_edition_limit(tmp_path, monkeypatch, count):
+    monkeypatch.setattr(editorial.shutil, "which", lambda _: "/bin/codex")
+    entries = {str(i): {"selected": True, "reason": "Important"} for i in range(count)}
+    entries["held"] = {"selected": False, "reason": "Lower priority"}
+    def run(command, **kwargs):
+        editorial.Path(command[command.index("-o") + 1]).write_text(json.dumps({"candidates": entries}))
+        return SimpleNamespace(returncode=0, stderr="")
+    monkeypatch.setattr(editorial.subprocess, "run", run)
+    prompt = tmp_path / "selection.md"
+    prompt.write_text("Select")
+    packets = {"shortlist": [{"id": id} for id in entries]}
+    if count > 28:
+        with pytest.raises(ValueError, match="maximum 28"):
+            editorial.codex_review(packets, prompt, tmp_path, editorial.EditionSelection)
+    else:
+        result = editorial.codex_review(packets, prompt, tmp_path, editorial.EditionSelection)
+        assert result.selected_ids == ["0"]
+        assert [(e.id, e.reason) for e in result.excluded] == [("held", "Lower priority")]
+
+
 @pytest.mark.parametrize("recovers", [True, False])
-def test_selection_overlap_retried_but_never_accepted(tmp_path, monkeypatch, recovers):
+def test_selection_requires_every_candidate_and_retries_omissions(tmp_path, monkeypatch, recovers):
     calls = []
     monkeypatch.setattr(editorial.shutil, "which", lambda _: "/bin/codex")
     def run(command, **kwargs):
         calls.append(kwargs["input"])
         contract = json.loads(editorial.Path(command[command.index("--output-schema") + 1]).read_text())
-        assert contract["properties"]["selected_ids"]["items"]["enum"] == ["a"]
-        excluded = [] if recovers and len(calls) == 2 else [{"id": "a", "reason": "Selected"}]
-        editorial.Path(command[command.index("-o") + 1]).write_text(json.dumps({"selected_ids": ["a"], "excluded": excluded}))
+        assert contract["properties"]["candidates"]["required"] == ["a"]
+        entries = {"a": {"selected": True, "reason": "Important"}} if recovers and len(calls) == 2 else {}
+        editorial.Path(command[command.index("-o") + 1]).write_text(json.dumps({"candidates": entries}))
         return SimpleNamespace(returncode=0, stderr="")
     monkeypatch.setattr(editorial.subprocess, "run", run)
     prompt = tmp_path / "selection.md"
@@ -25,10 +46,10 @@ def test_selection_overlap_retried_but_never_accepted(tmp_path, monkeypatch, rec
     if recovers:
         assert editorial.codex_review({"shortlist": [{"id": "a"}]}, prompt, tmp_path, editorial.EditionSelection).selected_ids == ["a"]
     else:
-        with pytest.raises(ValueError, match="must never appear in excluded"):
+        with pytest.raises(ValueError, match="exactly every shortlist ID"):
             editorial.codex_review({"shortlist": [{"id": "a"}]}, prompt, tmp_path, editorial.EditionSelection)
     assert len(calls) == 2
-    assert "Selected IDs must never appear in excluded" in calls[1]
+    assert "exactly every shortlist ID" in calls[1]
 
 
 def test_candidate_ids_are_constrained_and_hash_confusion_gets_specific_feedback(tmp_path, monkeypatch):

@@ -231,10 +231,15 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
         if result_type is ReviewBatch:
             candidates = packets if isinstance(packets, list) else packets["packets"]
             contract["$defs"]["Decision"]["properties"]["id"]["enum"] = [p["id"] for p in candidates]
-        elif result_type is EditionSelection and packets["shortlist"]:
+        elif result_type is EditionSelection:
             ids = [p["id"] for p in packets["shortlist"]]
-            contract["properties"]["selected_ids"]["items"]["enum"] = ids
-            contract["$defs"]["SelectionRejection"]["properties"]["id"]["enum"] = ids
+            entry = {"type": "object", "additionalProperties": False,
+                     "properties": {"selected": {"type": "boolean"}, "reason": {"type": "string"}},
+                     "required": ["selected", "reason"]}
+            contract = {"type": "object", "additionalProperties": False,
+                        "properties": {"candidates": {"type": "object", "additionalProperties": False,
+                                       "properties": {id: entry for id in ids}, "required": ids}},
+                        "required": ["candidates"]}
         schema.write_text(json.dumps(contract))
         result_path = root / "review.json"
         command = [executable, "exec", "--ignore-user-config", "--ephemeral",
@@ -254,6 +259,11 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
         environment = {key: value for key, value in os.environ.items()
                        if key in {"PATH", "HOME", "TMPDIR", "CODEX_HOME", "SSL_CERT_FILE", "TERM"}}
         prompt = prompt_path.read_text() + "\nREADER EDITORIAL PROFILE:\n" + json.dumps(reader_profile()) + "\nUNTRUSTED SOURCE PACKETS:\n" + json.dumps(packets, ensure_ascii=False)
+        if result_type is EditionSelection:
+            prompt += ("\nOUTPUT FORMAT: Return the schema's candidates object with exactly one entry for every shortlist ID. "
+                       "Set selected=true for at most 28 stories and selected=false for all others. "
+                       "Give each entry its editorial reason. Do not return selected_ids or excluded arrays; "
+                       "the application derives those from these decisions.")
         response_dir = Path(output_dir) / "responses"
         response_dir.mkdir(parents=True, exist_ok=True)
         key = hashlib.sha256((prompt + schema.read_text()).encode()).hexdigest()
@@ -277,7 +287,19 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
             response = result_path.read_text()
             (response_dir / f"{prompt_path.stem}-{key}-{attempt}.json").write_text(response)
             try:
-                reviewed = result_type.model_validate_json(response)
+                if result_type is EditionSelection:
+                    raw = json.loads(response)
+                    entries = raw.get("candidates") if isinstance(raw, dict) else None
+                    if not isinstance(entries, dict) or set(entries) != {p["id"] for p in packets["shortlist"]}:
+                        raise ValueError("Selection must contain exactly every shortlist ID")
+                    if any(not isinstance(entry, dict) or type(entry.get("selected")) is not bool or not isinstance(entry.get("reason"), str)
+                           for entry in entries.values()):
+                        raise ValueError("Each selection requires a boolean selected and a reason")
+                    reviewed = result_type.model_validate({
+                        "selected_ids": [id for id, entry in entries.items() if entry["selected"]],
+                        "excluded": [{"id": id, "reason": entry["reason"]} for id, entry in entries.items() if not entry["selected"]]})
+                else:
+                    reviewed = result_type.model_validate_json(response)
                 if isinstance(reviewed, ReviewBatch):
                     validate_decisions(reviewed, packets if isinstance(packets, list) else packets["packets"])
                 elif isinstance(reviewed, EditionSelection):
