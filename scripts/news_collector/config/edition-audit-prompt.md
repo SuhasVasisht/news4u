@@ -41,7 +41,7 @@ accounts of one event normally require consolidation, not different event keys.
 
 The checklist is independently researched discovery input, NOT a list you may
 invent by looking at the selected articles. Review every checklist event once.
-Map real coverage to selected story IDs. Trace missing events to discovery,
+Map real coverage to selected story IDs.
 For status covered, cause MUST be covered, story_ids must be nonempty and contain
 only selected IDs, and prior_story_ids must be empty. For missing, story_ids must
 be empty and cause must identify the gap (discovery, extraction, deduplication or
