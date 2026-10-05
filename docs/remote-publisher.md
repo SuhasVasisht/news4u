@@ -39,11 +39,12 @@ publishing before October 6, 2026, while leaving subsequent daily runs enabled:
 
 ```ini
 [Service]
-ExecCondition=/usr/bin/python3 -c "import datetime,sys,zoneinfo; sys.exit(datetime.datetime.now(zoneinfo.ZoneInfo('America/Los_Angeles')).date() < datetime.date(2026,10,6))"
+ExecCondition=/usr/bin/python3 -c "import datetime,sys,zoneinfo; now=datetime.datetime.now(zoneinfo.ZoneInfo('America/Los_Angeles')); sys.exit(now.date() < datetime.date(2026,10,6) or now.time() < datetime.time(7,5))"
 ```
 
 Reload systemd after adding the drop-in. An earlier timer tick will be skipped; the
-first eligible tick on the chosen date remains 07:05 Pacific. Inspect the condition,
+first eligible tick on the chosen date remains 07:05 Pacific. The time check also prevents
+reboot catch-up from publishing a new day before that morning cutoff. Inspect the condition,
 timer and journal together when confirming the first publication time.
 
 The supported static publication command is `npm run publish:daily`. It runs collection
