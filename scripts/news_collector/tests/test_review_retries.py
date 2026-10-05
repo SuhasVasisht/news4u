@@ -8,6 +8,29 @@ from news_collector.pipeline import editorial
 from test_editorial import packet, decision, row
 
 
+@pytest.mark.parametrize("recovers", [True, False])
+def test_semantic_validation_uses_bounded_retry(tmp_path, monkeypatch, recovers):
+    calls = []
+    monkeypatch.setattr(editorial.shutil, "which", lambda _: "/bin/codex")
+    def run(command, **kwargs):
+        calls.append(kwargs["input"])
+        editorial.Path(command[command.index("-o") + 1]).write_text(editorial.ReviewBatch(decisions=[decision()]).model_dump_json())
+        return SimpleNamespace(returncode=0, stderr="")
+    monkeypatch.setattr(editorial.subprocess, "run", run)
+    def validate(result):
+        if not recovers or len(calls) == 1:
+            raise ValueError("Unknown audit evidence p99; use supplied chunk p1")
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("Review")
+    if recovers:
+        assert editorial.codex_review([packet()], prompt, tmp_path, validate_result=validate).decisions
+    else:
+        with pytest.raises(ValueError, match="Unknown audit evidence"):
+            editorial.codex_review([packet()], prompt, tmp_path, validate_result=validate)
+    assert len(calls) == 2
+    assert "use supplied chunk p1" in calls[1]
+
+
 @pytest.mark.parametrize("count", [1, 29])
 def test_selection_mapping_preserves_exclusions_and_enforces_edition_limit(tmp_path, monkeypatch, count):
     monkeypatch.setattr(editorial.shutil, "which", lambda _: "/bin/codex")

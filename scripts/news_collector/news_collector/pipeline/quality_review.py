@@ -78,8 +78,19 @@ def run_batched_audit(request, prompt, output, reused, batch_size=5):
         number = offset // batch_size + 1
         total = (len(pending) + batch_size - 1) // batch_size
         print(f"Final factual audit: story batch {number}/{total} ({len(ids)} stories)", flush=True)
-        result = codex_review(payload, prompt, output, StoryAuditReview, allow_web=True)
-        normalize_batch_ids(result.stories, ids)
+        def validate_batch(result):
+            normalize_batch_ids(result.stories, ids)
+            # Validate citation/quotation contracts before accepting this call, so
+            # malformed output gets the same bounded retry as schema violations.
+            # Substantive holds remain findings for the complete audit and repair.
+            partial = build_audit_request(payload["packets"], payload["decisions"],
+                {"selected_ids": ids, "excluded": []}, request["history"], None,
+                datetime.fromisoformat(request["cutoff"]))
+            validate_audit({"requestHash": partial["requestHash"], "reviewer": "batch-contract-check",
+                "reviewedAt": datetime.now(timezone.utc).isoformat(),
+                "review": {"stories": [s.model_dump(mode="json") for s in result.stories], "coverage": []}}, partial)
+        result = codex_review(payload, prompt, output, StoryAuditReview, allow_web=True,
+                              validate_result=validate_batch)
         story_reviews.extend(result.stories)
 
     all_story_reviews = [*story_reviews, *reused]

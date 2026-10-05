@@ -137,13 +137,15 @@ def test_automatic_recheck_is_bounded_and_never_bypasses_hold(tmp_path, monkeypa
     monkeypatch.setattr(quality_review, "discover_coverage", coverage)
     monkeypatch.setattr(quality_review, "reconsider_announcements", lambda *_: None)
     calls = []
-    def audit(payload, prompt, output, result_type, *, allow_web=False):
+    def audit(payload, prompt, output, result_type, *, allow_web=False, validate_result=None):
         assert allow_web
         calls.append(payload)
         if result_type is StoryAuditReview:
             result = StoryAuditReview(stories=final["envelope"]["review"]["stories"])
             if len([call for call in calls if call["auditMode"] == "story_claims"]) == 1 or not recovers:
                 result.stories[0].verdict = "hold"
+            if validate_result:
+                validate_result(result)
             return result
         assert result_type is CoverageAuditReview
         return CoverageAuditReview(coverage=final["envelope"]["review"]["coverage"])

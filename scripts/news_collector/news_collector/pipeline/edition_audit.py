@@ -165,7 +165,9 @@ def validate_audit(payload, request, now=None):
             if not any(claim.passage in passage for passage in passages):
                 raise ValueError("Claim check must quote a passage actually being published")
             if not set(claim.evidence) <= refs or (claim.verdict == "supported" and not claim.evidence):
-                raise ValueError("Claim check has missing or unknown evidence references")
+                raise ValueError(f"Claim check has missing or unknown evidence references for {story.id}; "
+                                 f"received={claim.evidence}; valid={sorted(refs)}. "
+                                 "Use only supplied chunk IDs; supported claims require evidence.")
             if claim.verdict != "supported":
                 unsupported += 1
                 blockers.append(f"{story.id}: unresolved claim ({claim.verdict})")

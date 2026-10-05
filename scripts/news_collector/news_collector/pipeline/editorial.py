@@ -220,7 +220,7 @@ def source_hash(row):
         ["canonical_url", "title", "published_at", "text", "summary"]}, sort_keys=True).encode()).hexdigest()
 
 
-def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, allow_web=False):
+def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, allow_web=False, validate_result=None):
     executable = shutil.which(os.environ.get("NEWS_EDITOR_CODEX_BIN", "codex"))
     if not executable:
         raise RuntimeError("Codex CLI required for editorial review. Previous paper retained.")
@@ -305,6 +305,8 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
                     validate_decisions(reviewed, packets if isinstance(packets, list) else packets["packets"])
                 elif isinstance(reviewed, EditionSelection):
                     validate_selection(reviewed, packets["shortlist"])
+                if validate_result is not None:
+                    validate_result(reviewed)
                 return reviewed
             except ValueError as exc:
                 if attempt:
