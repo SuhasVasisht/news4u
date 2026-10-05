@@ -88,6 +88,7 @@ should own daily scheduling; stop the laptop/legacy scheduler when moving to the
 - Source errors are recorded in `data/collection-run.json` and source/audit files. A total
   collection failure blocks the run. Partial sources still go through the independent
   coverage/factual gate. Missing mailbox credentials block the unattended publisher.
+  Fresh collections check sources immediately while retaining their rate-limit cooldowns.
 - The previous site remains live through prepublication failures. A post-upload hosted
   verification failure is reported as failure and retried; the new site may already be
   live at that point. The publisher does not claim Cloudflare uploads are transactional

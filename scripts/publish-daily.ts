@@ -80,7 +80,11 @@ async function main() {
     await runStages(state, async (stage: Stage) => {
       console.log(`Starting ${stage}`);
       if (stage === "collect") {
-        const output = execFileSync(python, ["-m", "news_collector.jobs.collect"], { cwd, stdio: publisherStdio("pipe"), encoding: "utf8", timeout: 20 * 60_000, maxBuffer: 10 * 1024 * 1024 });
+        const output = execFileSync(python, ["-m", "news_collector.jobs.collect"], {
+          cwd, stdio: publisherStdio("pipe"), encoding: "utf8", timeout: 20 * 60_000, maxBuffer: 10 * 1024 * 1024,
+          // A fresh edition checks sources now, while respecting upstream cooldowns.
+          env: { ...process.env, NEWS_COLLECTOR_CHECK_NOW: "1", NEWS_COLLECTOR_FORCE_RUN: "0" },
+        });
         const collection = JSON.parse(output);
         if (!collection.sources?.some((source: { status: string; collected: number }) => ["ok", "partial"].includes(source.status) && source.collected > 0)) throw new Error("Collection produced no usable sources");
         await atomicJson(path.join(root, "data/collection-run.json"), collection);
