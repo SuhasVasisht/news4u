@@ -1,5 +1,50 @@
 # Daily publisher on a remote VM
 
+## Native Ubuntu alternative with an existing Codex login
+
+For a server already running Node 22, Python 3.12 and an authenticated Codex CLI,
+use a clean checkout at `~/news-publisher` and the user service in
+`deploy/news-publisher-user.service`. Keep unrelated dirty checkouts intact.
+Install npm dependencies with `npm ci`; install uv 0.10.9 and run
+`uv sync --project scripts/news_collector --locked --extra dev`. Install Chromium
+for both Node and Python Playwright, including their Linux system dependencies.
+Store the publisher credentials and `NEWS_EDITOR_MODEL=gpt-5.6-luna` in the ignored,
+mode-0600 `~/news-publisher/.env`. Set `NEWS_EDITOR_CODEX_BIN` to the existing CLI's
+absolute path and `NEWS_BACKUP_DIR` outside the checkout. This service runs as the
+existing user, so its original Codex authentication is reused without copying tokens.
+
+```sh
+mkdir -p ~/.config/systemd/user
+cp deploy/news-publisher-user.service deploy/news-publisher-user.timer ~/.config/systemd/user/
+sudo loginctl enable-linger "$USER"
+systemctl --user daemon-reload
+systemctl --user enable --now news-publisher-user.timer
+systemctl --user list-timers news-publisher-user.timer
+journalctl --user -u news-publisher-user.service -n 100 --no-pager
+```
+
+Linger keeps the user service available after logout and boot. Enable only one publisher
+timer; use either this native service or the Docker service below. Stop the legacy
+`news-app-scheduler-1` container when transferring scheduling ownership, without stopping
+its unrelated web/database services. Disable its restart policy to keep it stopped
+after reboot. Test Codex, mailbox and Cloudflare access under the service user before
+activation. `npm run build:daily` provides a real collection/review/build rehearsal
+without uploading; load `.env` through the service's `EnvironmentFile` for that rehearsal
+and restore public history first. Keep normal final audit and local release checks.
+
+To defer the first publication, add a user-service drop-in with an `ExecCondition`
+checking the start date in America/Los_Angeles. For example, the following prevents
+publishing before October 6, 2026, while leaving subsequent daily runs enabled:
+
+```ini
+[Service]
+ExecCondition=/usr/bin/python3 -c "import datetime,sys,zoneinfo; sys.exit(datetime.datetime.now(zoneinfo.ZoneInfo('America/Los_Angeles')).date() < datetime.date(2026,10,6))"
+```
+
+Reload systemd after adding the drop-in. An earlier timer tick will be skipped; the
+first eligible tick on the chosen date remains 07:05 Pacific. Inspect the condition,
+timer and journal together when confirming the first publication time.
+
 The supported static publication command is `npm run publish:daily`. It runs collection
 (including IMAP newsletters), evidence-based editorial selection and independent final
 audit, sports review, export, static rendering, local Chromium checks, Cloudflare upload,

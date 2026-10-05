@@ -1,0 +1,19 @@
+[Unit]
+Description=Collect, review and publish the daily newspaper using the existing user login
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/news-publisher
+Environment=PATH=%h/.npm-global/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=TZ=America/Los_Angeles
+Environment=APP_TIMEZONE=America/Los_Angeles
+EnvironmentFile=%h/news-publisher/.env
+ExecStart=/usr/bin/npm run publish:daily
+TimeoutStartSec=4h
+TimeoutStopSec=60s
+KillMode=control-group
+UMask=0077
+StandardOutput=journal
+StandardError=journal

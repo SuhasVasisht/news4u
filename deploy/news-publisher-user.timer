@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily newspaper at 07:05 Pacific with half-hourly retries
+
+[Timer]
+OnCalendar=*-*-* 07..22:05,35:00 America/Los_Angeles
+Persistent=true
+RandomizedDelaySec=30
+Unit=news-publisher-user.service
+
+[Install]
+WantedBy=timers.target
