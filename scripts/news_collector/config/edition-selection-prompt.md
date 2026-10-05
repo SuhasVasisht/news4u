@@ -61,3 +61,9 @@ a coverage benchmark, not evidence for rewriting an article or admitting a held
 candidate. Never pretend a loosely related story covers an event it does not
 actually report. The subsequent independent factual audit still determines
 whether the chosen coverage is adequate and supported.
+
+When coverageFindings is supplied, the previous selection failed its independent
+audit. Address each missing event using an admitted, directly relevant account
+from the shortlist, replacing optional stories when necessary. Never invent a
+candidate or promote held evidence. Preserve other required coverage. If no
+supported account exists, leave the gap explicit rather than claiming coverage.

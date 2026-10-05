@@ -200,3 +200,12 @@ dev`, Node Chromium (`npx playwright install chromium`) and Python Chromium
 Node, uv and Codex versions; npm and uv locks pin application dependencies. Editorial
 outputs can still vary with live news and model behavior; reproducibility means the same
 pipeline and acceptance criteria, not byte-identical future articles.
+
+Editorial retries retain the draft tied to the publisher run's date, code revision,
+public history and collection start. A new run invalidates that draft. Independent
+research can be reused only within its six-hour/day cutoff and unchanged research
+configuration. Successful factual batches are cached against their full evidence,
+prose, selection context, history, prompt and model settings, and are revalidated
+on reuse. Coverage output contracts are checked inside the bounded model retry;
+genuine missing coverage still blocks publication and permits one audited reselection.
+No malformed coverage response can authorize deployment.

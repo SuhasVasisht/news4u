@@ -94,6 +94,7 @@ async function main() {
       } else if (["editorial", "sports", "export"].includes(stage)) {
         execFileSync(python, ["-m", `news_collector.jobs.${stage === "export" ? "export_edition" : stage}`], {
           cwd, stdio: publisherStdio(), timeout: (stage === "editorial" ? 90 : stage === "sports" ? 30 : 2) * 60_000,
+          env: { ...process.env, NEWS_EDITORIAL_RUN_KEY: hash(JSON.stringify([state.date, state.revision, state.history, state.startedAt])) },
         });
       } else if (stage === "build") script("scripts/build-static.tsx", [], 20 * 60_000);
       else {

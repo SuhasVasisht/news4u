@@ -37,6 +37,26 @@ def atomic_json(path, value):
     temporary.replace(path)
 
 
+def cached_audit(payload, prompt, output, result_type, validate):
+    identity = {"version": 1, "payload": payload, "prompt": prompt.read_text(),
+                "model": os.environ.get("NEWS_EDITOR_MODEL", "default"),
+                "effort": os.environ.get("NEWS_EDITOR_REASONING_EFFORT", "default")}
+    key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+    cache = output / "audit-calls" / f"{key}.json"
+    if cache.exists():
+        result = result_type.model_validate_json(cache.read_text())
+        validate(result)
+        print("Reusing validated audit call for unchanged evidence", flush=True)
+        return result
+    result = codex_review(payload, prompt, output, result_type, allow_web=True, validate_result=validate)
+    validate(result)
+    if isinstance(result, StoryAuditReview) and all(
+            story.verdict == "pass" and all(claim.verdict == "supported" for claim in story.claims)
+            for story in result.stories):
+        atomic_json(cache, result.model_dump(mode="json"))
+    return result
+
+
 def normalize_batch_ids(stories, expected):
     """Repair only an unambiguous one-character transcription of an opaque ID."""
     if len(stories) != len(expected) or len({story.id for story in stories}) != len(stories):
@@ -89,8 +109,7 @@ def run_batched_audit(request, prompt, output, reused, batch_size=5):
             validate_audit({"requestHash": partial["requestHash"], "reviewer": "batch-contract-check",
                 "reviewedAt": datetime.now(timezone.utc).isoformat(),
                 "review": {"stories": [s.model_dump(mode="json") for s in result.stories], "coverage": []}}, partial)
-        result = codex_review(payload, prompt, output, StoryAuditReview, allow_web=True,
-                              validate_result=validate_batch)
+        result = cached_audit(payload, prompt, output, StoryAuditReview, validate_batch)
         story_reviews.extend(result.stories)
 
     all_story_reviews = [*story_reviews, *reused]
@@ -110,7 +129,14 @@ def run_batched_audit(request, prompt, output, reused, batch_size=5):
         "candidate_index": request["candidate_index"],
     }
     print(f"Final coverage audit: {len(request['checklist']['events']) if request['checklist'] else 0} independently discovered events", flush=True)
-    coverage = codex_review(coverage_payload, prompt, output, CoverageAuditReview, allow_web=True)
+    def validate_coverage(result):
+        validate_audit({"requestHash": request["requestHash"], "reviewer": "coverage-contract-check",
+            "reviewedAt": datetime.now(timezone.utc).isoformat(),
+            "review": {"stories": [s.model_dump(mode="json") for s in all_story_reviews],
+                       "coverage": [c.model_dump(mode="json") for c in result.coverage]}}, request)
+    coverage = codex_review(coverage_payload, prompt, output, CoverageAuditReview,
+                           allow_web=True, validate_result=validate_coverage)
+    validate_coverage(coverage)
     return AuditReview(stories=all_story_reviews, coverage=coverage.coverage)
 
 
@@ -124,7 +150,7 @@ def verify_final_audit(review, history, now=None):
     return report
 
 
-def reconsider_announcements(review, history, output, checklist=None):
+def reconsider_announcements(review, history, output, checklist=None, findings=None):
     prompt = Path(__file__).resolve().parents[2] / "config/announcement-review-prompt.md"
     promoted = False
     for packet in review["packets"]:
@@ -152,6 +178,8 @@ def reconsider_announcements(review, history, output, checklist=None):
         payload = {"shortlist": shortlist, "previouslyPublished": history}
         if checklist:
             payload["coverageChecklist"] = checklist
+        if findings:
+            payload["coverageFindings"] = findings
         key = hashlib.sha256((json.dumps(payload, sort_keys=True) + selection_prompt.read_text()
                               + json.dumps(reader_profile(), sort_keys=True)
                               + os.environ.get("NEWS_EDITOR_MODEL", "default")).encode()).hexdigest()
@@ -175,7 +203,7 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
     response_path = output / "quality-review-response.json"
     current_hash = audit_request(review, history, checklist)["requestHash"]
     already_selected = response_path.exists() and json.loads(response_path.read_text()).get("requestHash") == current_hash
-    if not audit_file and not already_selected:
+    if not audit_file and not already_selected and not _repair_attempt:
         reconsider_announcements(review, history, output, checklist)
     request = audit_request(review, history, checklist)
     reused = []
@@ -262,6 +290,11 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
     atomic_json(root / "data/quality/history" / f"{date}-{request['requestHash']}.json", payload)
     if report.status == "blocked" and not audit_file and _repair_attempt == 0:
         print("Final audit blocked publication; attempting one bounded repair and recheck", flush=True)
+        missing_selection = [item.model_dump(mode="json") for item in report.review.coverage
+                             if item.status == "missing" and item.cause == "selection"]
+        if missing_selection:
+            reconsider_announcements(review, history, output, checklist, findings=missing_selection)
+            atomic_json(output / "latest.json", review)
         # Reuse the exact checklist that produced this audit. Rediscovering coverage
         # during a repair can move the goalposts and waste a second research pass.
         return run_quality_review(root, review, output / "checklist.json", _repair_attempt=1)

@@ -1,6 +1,25 @@
 from news_collector.pipeline.editorial import run_editorial
 from news_collector.runtime import build_runtime
 import argparse
+import json
+import os
+
+
+def prepare_editorial(repository, settings, config, args):
+    from news_collector.pipeline.quality_review import atomic_json
+    output = settings.project_root.parent.parent / "data/editorial"
+    marker = output / "publisher-draft.json"
+    key = os.environ.get("NEWS_EDITORIAL_RUN_KEY")
+    can_resume = key and not args.prepare_review and not args.review_file
+    if can_resume and marker.exists():
+        saved = json.loads(marker.read_text())
+        if saved.get("key") == key:
+            print("Resuming the editorial evidence snapshot for this publisher run", flush=True)
+            return saved["review"]
+    result = run_editorial(repository, settings, config, review_file=args.review_file, prepare_only=args.prepare_review)
+    if can_resume:
+        atomic_json(marker, {"key": key, "review": result})
+    return result
 
 
 def main():
@@ -10,7 +29,7 @@ def main():
     parser.add_argument("--checklist-file")
     args = parser.parse_args()
     settings, config, repository, _ = build_runtime()
-    result = run_editorial(repository, settings, config, review_file=args.review_file, prepare_only=args.prepare_review)
+    result = prepare_editorial(repository, settings, config, args)
     if args.prepare_review:
         print({"request": result["request"], "pending": result["pending"], "cached": len(result["decisions"])})
         return

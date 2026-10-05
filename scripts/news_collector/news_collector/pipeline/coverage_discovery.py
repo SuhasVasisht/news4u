@@ -39,6 +39,17 @@ def validate_checklist(payload, cutoff, profile, now=None):
 def discover_coverage(output, cutoff, profile, checklist_file=None):
     """Return and persist a validated checklist; errors leave the prior file untouched."""
     output = Path(output)
+    prompt_path = Path(__file__).resolve().parents[2] / "config" / "coverage-discovery-prompt.md"
+    context = {"profile": profile, "prompt": prompt_path.read_text(),
+               "model": os.environ.get("NEWS_EDITOR_MODEL", "default"),
+               "effort": os.environ.get("NEWS_EDITOR_REASONING_EFFORT", "default")}
+    context_path = output.with_suffix(".context.json")
+    if checklist_file is None and output.exists() and context_path.exists():
+        try:
+            if json.loads(context_path.read_text()) == context:
+                return validate_checklist(json.loads(output.read_text()), cutoff, profile)
+        except (ValueError, TypeError):
+            pass  # A new day or expired research requires fresh discovery.
     if checklist_file is not None:
         payload = json.loads(Path(checklist_file).read_text())
     else:
@@ -83,4 +94,5 @@ def discover_coverage(output, cutoff, profile, checklist_file=None):
         temporary.replace(output)
     finally:
         temporary.unlink(missing_ok=True)
+    context_path.write_text(json.dumps(context, sort_keys=True))
     return validated
