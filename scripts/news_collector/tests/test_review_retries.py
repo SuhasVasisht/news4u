@@ -8,6 +8,29 @@ from news_collector.pipeline import editorial
 from test_editorial import packet, decision, row
 
 
+def test_story_audit_schema_binds_ids_passages_and_evidence(tmp_path, monkeypatch):
+    from test_edition_audit import fixture
+    from news_collector.pipeline.edition_audit import StoryAuditReview
+    request, envelope = fixture()
+    request["auditStoryIds"] = ["a"]
+    request["decisions"][0].setdefault("sections", [])
+    monkeypatch.setattr(editorial.shutil, "which", lambda _: "/bin/codex")
+    def run(command, **kwargs):
+        schema = json.loads(editorial.Path(command[command.index("--output-schema") + 1]).read_text())
+        stories = schema["properties"]["stories"]
+        assert stories["required"] == ["a"]
+        claim = stories["properties"]["a"]["properties"]["claims"]["items"]
+        assert request["decisions"][0]["headline"] in claim["properties"]["passage"]["enum"]
+        assert claim["properties"]["evidence"]["items"]["enum"] == ["p1"]
+        result = {"stories": {"a": envelope["review"]["stories"][0]}}
+        editorial.Path(command[command.index("-o") + 1]).write_text(json.dumps(result))
+        return SimpleNamespace(returncode=0, stderr="")
+    monkeypatch.setattr(editorial.subprocess, "run", run)
+    prompt = tmp_path / "audit.md"
+    prompt.write_text("Audit")
+    assert editorial.codex_review(request, prompt, tmp_path, StoryAuditReview).stories[0].id == "a"
+
+
 @pytest.mark.parametrize("recovers", [True, False])
 def test_semantic_validation_uses_bounded_retry(tmp_path, monkeypatch, recovers):
     calls = []

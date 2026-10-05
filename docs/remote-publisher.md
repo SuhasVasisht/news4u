@@ -204,8 +204,12 @@ pipeline and acceptance criteria, not byte-identical future articles.
 Editorial retries retain the draft tied to the publisher run's date, code revision,
 public history and collection start. A new run invalidates that draft. Independent
 research can be reused only within its six-hour/day cutoff and unchanged research
-configuration. Successful factual batches are cached against their full evidence,
+configuration. Structurally valid factual batches, including hold findings, are cached against their full evidence,
 prose, selection context, history, prompt and model settings, and are revalidated
 on reuse. Coverage output contracts are checked inside the bounded model retry;
 genuine missing coverage still blocks publication and permits one audited reselection.
 No malformed coverage response can authorize deployment.
+
+Audit schemas bind each story to its exact published text and available chunk IDs.
+Cached holds remain holds until repair or selection changes the reviewed inputs;
+retries do not repeatedly ask for a different verdict on unchanged evidence.

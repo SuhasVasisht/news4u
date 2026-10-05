@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -22,6 +23,7 @@ from selectolax.parser import HTMLParser
 
 from news_collector.pipeline.extract import extract_text_from_html
 from news_collector.pipeline.structured_output import review_schema
+from news_collector.pipeline.edition_audit import StoryAuditReview
 from news_collector.pipeline.images import download
 from news_collector.utils import parse_datetime
 from news_collector.pipeline.publication_history import load_history, history_hash, prior_match
@@ -240,6 +242,28 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
                             "reasons": {"type": "object", "additionalProperties": False,
                                         "properties": {id: {"type": "string"} for id in ids}, "required": ids}},
                         "required": ["selected_ids", "reasons"]}
+        elif result_type is StoryAuditReview:
+            definitions = contract["$defs"]
+            story_contracts = {}
+            evidence = {p["id"]: [c["id"] for c in p["chunks"]] for p in packets["packets"]}
+            for decision in packets["decisions"]:
+                story = deepcopy(definitions["StoryAudit"])
+                story["properties"]["id"]["enum"] = [decision["id"]]
+                claim = deepcopy(definitions["ClaimCheck"])
+                passages = [decision["headline"], decision["summary"], *decision["points"],
+                            *decision.get("caveats", []),
+                            *[text for section in decision["sections"] for text in (section["heading"], section["body"])]]
+                claim["properties"]["passage"]["enum"] = list(dict.fromkeys(p for p in passages if p.strip()))
+                refs = evidence[decision["id"]]
+                for array in [claim["properties"]["evidence"], story["properties"]["materialUpdateEvidence"]]:
+                    if refs:
+                        array["items"]["enum"] = refs
+                    else:
+                        array["maxItems"] = 0
+                story["properties"]["claims"]["items"] = claim
+                story_contracts[decision["id"]] = story
+            contract["properties"]["stories"] = {"type": "object", "additionalProperties": False,
+                "properties": story_contracts, "required": list(story_contracts)}
         schema.write_text(json.dumps(contract))
         result_path = root / "review.json"
         command = [executable, "exec", "--ignore-user-config", "--ephemeral",
@@ -263,6 +287,11 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
             prompt += ("\nOUTPUT FORMAT: Return selected_ids with at most 28 unique shortlist IDs, "
                        "plus a reasons object containing an editorial reason for EVERY shortlist ID, selected or excluded. "
                        "Do not return an excluded array; the application derives it from IDs absent from selected_ids.")
+        elif result_type is StoryAuditReview:
+            prompt += ("\nOUTPUT FORMAT: Return stories as an object keyed by every requested story ID. "
+                       "Each claim passage must be one complete published block allowed by the schema. "
+                       "Audit every factual assertion in each block; use multiple checks with the same passage "
+                       "if its assertions have different verdicts. Cite only the supplied chunk IDs.")
         response_dir = Path(output_dir) / "responses"
         response_dir.mkdir(parents=True, exist_ok=True)
         key = hashlib.sha256((prompt + schema.read_text()).encode()).hexdigest()
@@ -299,6 +328,12 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
                     reviewed = result_type.model_validate({
                         "selected_ids": selected,
                         "excluded": [{"id": id, "reason": reason} for id, reason in reasons.items() if id not in selected]})
+                elif result_type is StoryAuditReview:
+                    raw = json.loads(response)
+                    stories = raw.get("stories") if isinstance(raw, dict) else None
+                    if not isinstance(stories, dict) or set(stories) != set(packets["auditStoryIds"]):
+                        raise ValueError("Audit must return every requested story ID exactly once")
+                    reviewed = result_type.model_validate({"stories": [stories[id] for id in packets["auditStoryIds"]]})
                 else:
                     reviewed = result_type.model_validate_json(response)
                 if isinstance(reviewed, ReviewBatch):
@@ -314,7 +349,7 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
                 feedback = ("\nVALIDATION FEEDBACK: The previous response failed the output contract: "
                             + str(exc)[:400] + ". Regenerate a complete response for every input ID. "
                             "Hold evidence-ineligible items; never relax the stated requirements.")
-                print("Retrying review after output validation failed", flush=True)
+                print(f"Retrying review after output validation failed: {str(exc)[:400]}", flush=True)
 
 
 def validate_selection(selection, shortlist):

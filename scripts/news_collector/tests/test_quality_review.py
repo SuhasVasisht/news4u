@@ -119,8 +119,7 @@ def test_final_gate_rejects_changes_after_review(target):
         verify_final_audit(review, [], NOW)
 
 
-@pytest.mark.parametrize("recovers", [True, False])
-def test_automatic_recheck_is_bounded_and_never_bypasses_hold(tmp_path, monkeypatch, recovers):
+def test_automatic_recheck_is_bounded_and_never_bypasses_hold(tmp_path, monkeypatch):
     review = reviewed_fixture()
     final = review.pop("finalAudit")
     class Clock(datetime):
@@ -142,21 +141,16 @@ def test_automatic_recheck_is_bounded_and_never_bypasses_hold(tmp_path, monkeypa
         calls.append(payload)
         if result_type is StoryAuditReview:
             result = StoryAuditReview(stories=final["envelope"]["review"]["stories"])
-            if len([call for call in calls if call["auditMode"] == "story_claims"]) == 1 or not recovers:
-                result.stories[0].verdict = "hold"
+            result.stories[0].verdict = "hold"
             if validate_result:
                 validate_result(result)
             return result
         assert result_type is CoverageAuditReview
         return CoverageAuditReview(coverage=final["envelope"]["review"]["coverage"])
     monkeypatch.setattr(quality_review, "codex_review", audit)
-    if recovers:
-        assert quality_review.run_quality_review(tmp_path, review).status == "passed"
-    else:
-        with pytest.raises(ValueError, match="blocked publication"):
-            quality_review.run_quality_review(tmp_path, review)
-        assert "finalAudit" not in json.loads((tmp_path / "data/editorial/latest.json").read_text())
-    assert len(calls) == 4
+    with pytest.raises(ValueError, match="blocked publication"):
+        quality_review.run_quality_review(tmp_path, review)
+    assert "finalAudit" not in json.loads((tmp_path / "data/editorial/latest.json").read_text())
     assert [call["auditMode"] for call in calls] == [
-        "story_claims", "coverage_reconciliation", "story_claims", "coverage_reconciliation"]
+        "story_claims", "coverage_reconciliation", "coverage_reconciliation"]
     assert checklist_inputs == [None, tmp_path / "data/editorial/checklist.json"]

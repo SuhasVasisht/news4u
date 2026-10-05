@@ -50,10 +50,9 @@ def cached_audit(payload, prompt, output, result_type, validate):
         return result
     result = codex_review(payload, prompt, output, result_type, allow_web=True, validate_result=validate)
     validate(result)
-    if isinstance(result, StoryAuditReview) and all(
-            story.verdict == "pass" and all(claim.verdict == "supported" for claim in story.claims)
-            for story in result.stories):
-        atomic_json(cache, result.model_dump(mode="json"))
+    # Preserve holds as findings, not approvals. Repair/pruning must change the
+    # inputs; repeated calls must not turn the same evidence into a lucky pass.
+    atomic_json(cache, result.model_dump(mode="json"))
     return result
 
 
