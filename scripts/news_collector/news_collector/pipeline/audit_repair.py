@@ -1,5 +1,6 @@
 """Bounded corrections and reuse of unchanged, evidence-bound factual checks."""
 from copy import deepcopy
+import re
 from markdown_it import MarkdownIt
 from pydantic import BaseModel, ConfigDict
 from news_collector.pipeline.editorial import Decision, NoteSection, ReviewBatch, validate_decisions
@@ -34,6 +35,7 @@ def apply_corrections(initial, corrections, packets):
 def plain_review_prose(review):
     parser = MarkdownIt("commonmark", {"html": False})
     def plain(value):
+        value = re.sub(r"\s*\[p\d+(?:\s*[,;]\s*p\d+)*\]", "", value)
         tokens = parser.parseInline(value)[0].children or []
         if any(token.type == "image" for token in tokens):
             raise ValueError("Images are not valid article prose")

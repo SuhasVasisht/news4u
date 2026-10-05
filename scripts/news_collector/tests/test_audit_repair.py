@@ -90,3 +90,13 @@ def test_held_and_incomplete_checks_cannot_be_reused():
     assert not reusable_story_checks(request, request, report)
     report.review.stories[0].claims[0].verdict = "uncertain"
     assert repairable_ids(report) == ["a"]
+
+
+def test_plain_prose_removes_internal_chunk_markers_without_changing_claims():
+    from test_editorial import decision
+    from news_collector.pipeline.editorial import ReviewBatch
+    item = decision(summary='The company said revenue grew 10% [p1, p2]. It remains a claim [p3].')
+    before = item.evidence.copy()
+    result = plain_review_prose(ReviewBatch(decisions=[item])).decisions[0]
+    assert result.summary == 'The company said revenue grew 10%. It remains a claim.'
+    assert result.evidence == before

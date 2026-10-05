@@ -511,6 +511,9 @@ def run_editorial(repository, settings, config, review_file=None, prepare_only=F
             temporary_cache = cache.with_suffix(".tmp")
             temporary_cache.write_text(ReviewBatch(decisions=[decision]).model_dump_json(indent=2))
             temporary_cache.replace(cache)
+    from news_collector.pipeline.audit_repair import plain_review_prose
+    normalized = plain_review_prose(ReviewBatch(decisions=[Decision.model_validate(d) for d in decisions.values()]))
+    decisions = {decision.id: decision.model_dump() for decision in normalized.decisions}
     validate_ranking_review([Decision.model_validate(d) for d in decisions.values()], packets)
     shortlist = [{**decisions[p["id"]], "source": p["source"], "url": p["url"], "publishedAt": p["publishedAt"]}
                  for p in packets if decisions[p["id"]]["decision"] == "admit"]

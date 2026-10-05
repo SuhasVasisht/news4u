@@ -213,3 +213,10 @@ No malformed coverage response can authorize deployment.
 Audit schemas bind each story to its exact published text and available chunk IDs.
 Cached holds remain holds until repair or selection changes the reviewed inputs;
 retries do not repeatedly ask for a different verdict on unchanged evidence.
+
+Independent must-cover discovery uses the same 48-hour breaking-news window as
+ordinary editorial admission. Older context cannot create a new blocking event
+without a recent, verified source for a material development. Discovery uses the
+shared bounded review runner. Internal chunk markers and Markdown formatting are
+normalized before selection and factual auditing; evidence links remain in the
+review records and no factual claims are rewritten by that normalization.

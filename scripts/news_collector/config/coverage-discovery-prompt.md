@@ -30,3 +30,11 @@ search snippet, or report citing an inaccessible underlying article is not enoug
 Do not manufacture a must-cover quota. If research tools fail, report the failure
 instead of fabricating a checklist. Automated schema and freshness checks cannot
 substitute for actually conducting this research.
+
+The breaking-news window is windowStart through cutoff (48 hours). Must-cover
+requirements must concern a material new development within that window, backed
+by at least one directly relevant, verified source published within the window.
+Older background sources may corroborate it, but an old event, a refreshed topic
+landing page, or a new search result is not a new development. Do not impose
+catch-up requirements for weeks-old outbreaks, reports, orders or conflicts.
+Use the requested window in search queries and verify dates on direct articles.

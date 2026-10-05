@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from news_collector.pipeline import coverage_discovery as discovery
+from news_collector.pipeline import editorial
 
 
 NOW = datetime(2026, 9, 11, 4, 50, tzinfo=timezone.utc)
@@ -75,7 +76,7 @@ def test_file_mode_validates_before_replacing(tmp_path):
 
 
 def test_cli_isolated_live_research_and_fail_closed(monkeypatch, tmp_path):
-    monkeypatch.setattr(discovery.shutil, "which", lambda _: "/bin/codex")
+    monkeypatch.setattr(editorial.shutil, "which", lambda _: "/bin/codex")
     monkeypatch.setenv("SECRET_TOKEN", "private")
 
     def run(command, **kwargs):
@@ -83,16 +84,42 @@ def test_cli_isolated_live_research_and_fail_closed(monkeypatch, tmp_path):
         assert "--ignore-user-config" in command and "--ephemeral" in command
         assert "shell_tool" in command and "apps" in command and "hooks" in command
         assert "SECRET_TOKEN" not in kwargs["env"]
-        research = json.loads(kwargs["input"].split("RESEARCH INPUT:\n")[1])
-        assert set(research) == {"cutoff", "profile"}
+        research = json.loads(kwargs["input"].split("UNTRUSTED SOURCE PACKETS:\n")[1])
+        assert set(research) == {"cutoff", "profile", "windowStart"}
         discovery.Path(command[command.index("-o") + 1]).write_text(json.dumps(checklist()))
-        return SimpleNamespace(returncode=0)
+        return SimpleNamespace(returncode=0, stderr="")
 
-    monkeypatch.setattr(discovery.subprocess, "run", run)
+    monkeypatch.setattr(editorial.subprocess, "run", run)
     target = tmp_path / "checklist.json"
     discovery.discover_coverage(target, NOW, {"timezone": "America/Los_Angeles"})
     before = target.read_bytes()
-    monkeypatch.setattr(discovery.subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=1))
-    with pytest.raises(RuntimeError, match="discovery failed"):
+    monkeypatch.setattr(editorial.subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=1, stderr="authentication failed"))
+    with pytest.raises(RuntimeError, match="review failed"):
         discovery.discover_coverage(target, NOW, {})
     assert target.read_bytes() == before
+
+
+def test_old_background_cannot_create_a_daily_must_cover_requirement():
+    payload = checklist()
+    payload['events'][0]['sources'][0]['publishedAt'] = (NOW - timedelta(days=8)).isoformat()
+    with pytest.raises(ValueError, match='48-hour news window'):
+        discovery.validate_checklist(payload, NOW, {})
+    payload['events'][0]['mustCover'] = False
+    assert discovery.validate_checklist(payload, NOW, {})
+
+
+def test_current_discovery_reused_but_stale_research_requires_a_new_call(tmp_path, monkeypatch):
+    calls = []
+    def review(*args, **kwargs):
+        calls.append(1)
+        return discovery.IndependentChecklist.model_validate(checklist())
+    monkeypatch.setattr(editorial, 'codex_review', review)
+    target = tmp_path / 'checklist.json'
+    discovery.discover_coverage(target, NOW, {})
+    discovery.discover_coverage(target, NOW, {})
+    assert len(calls) == 1
+    old = checklist()
+    old['checkedAt'] = (NOW - timedelta(hours=7)).isoformat()
+    target.write_text(json.dumps(old))
+    discovery.discover_coverage(target, NOW, {})
+    assert len(calls) == 2

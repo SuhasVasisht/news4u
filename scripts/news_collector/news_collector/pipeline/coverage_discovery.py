@@ -5,13 +5,10 @@ from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
-import shutil
-import subprocess
 import tempfile
 from zoneinfo import ZoneInfo
 
 from .edition_audit import IndependentChecklist
-from .structured_output import review_schema
 
 
 def validate_checklist(payload, cutoff, profile, now=None):
@@ -33,6 +30,8 @@ def validate_checklist(payload, cutoff, profile, now=None):
         for source in event.sources:
             if source.publishedAt.tzinfo is None or source.publishedAt > min(cutoff, checked) + timedelta(minutes=5):
                 raise ValueError("Discovery source publication date is naive or after cutoff")
+        if event.mustCover and not any(source.publishedAt >= cutoff - timedelta(hours=48) for source in event.sources):
+            raise ValueError(f"Must-cover event {event.id} lacks a new development within the 48-hour news window")
     return checklist.model_dump(mode="json")
 
 
@@ -53,31 +52,12 @@ def discover_coverage(output, cutoff, profile, checklist_file=None):
     if checklist_file is not None:
         payload = json.loads(Path(checklist_file).read_text())
     else:
-        executable = shutil.which(os.environ.get("NEWS_EDITOR_CODEX_BIN", "codex"))
-        if not executable:
-            raise RuntimeError("Codex CLI required for independent discovery; previous paper retained")
-        prompt_path = Path(__file__).resolve().parents[2] / "config" / "coverage-discovery-prompt.md"
-        with tempfile.TemporaryDirectory(prefix="news-discovery-") as directory:
-            root = Path(directory)
-            schema, result = root / "schema.json", root / "checklist.json"
-            schema.write_text(json.dumps(review_schema(IndependentChecklist)))
-            command = [executable, "exec", "--ignore-user-config", "--ephemeral",
-                       "--skip-git-repo-check", "--sandbox", "read-only", "-C", directory,
-                       "--disable", "shell_tool", "--disable", "unified_exec", "--disable", "apps",
-                       "--disable", "hooks", "--disable", "browser_use", "--disable", "computer_use",
-                       "-c", 'web_search="live"', "--output-schema", str(schema), "-o", str(result), "-"]
-            model = os.environ.get("NEWS_EDITOR_MODEL")
-            if model:
-                command[2:2] = ["--model", model]
-            environment = {key: value for key, value in os.environ.items()
-                           if key in {"PATH", "HOME", "TMPDIR", "CODEX_HOME", "SSL_CERT_FILE", "TERM"}}
-            prompt = prompt_path.read_text() + "\nRESEARCH INPUT:\n" + json.dumps(
-                {"cutoff": cutoff.isoformat(), "profile": profile}, ensure_ascii=False)
-            run = subprocess.run(command, input=prompt, text=True, capture_output=True,
-                                 env=environment, timeout=600)
-            if run.returncode or not result.exists():
-                raise RuntimeError(f"Independent discovery failed (exit {run.returncode}); previous paper retained")
-            payload = json.loads(result.read_text())
+        from .editorial import codex_review
+        research = {"cutoff": cutoff.isoformat(), "profile": profile,
+                    "windowStart": (cutoff - timedelta(hours=48)).isoformat()}
+        result = codex_review(research, prompt_path, output.parent, IndependentChecklist,
+            allow_web=True, validate_result=lambda result: validate_checklist(result.model_dump(mode="json"), cutoff, profile))
+        payload = result.model_dump(mode="json")
     validated = validate_checklist(payload, cutoff, profile)
     output.parent.mkdir(parents=True, exist_ok=True)
     # A failed write or validation must never replace the previous reviewed checklist.
