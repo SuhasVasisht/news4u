@@ -46,6 +46,7 @@ trust_scores:
   hawley_oversight: 0.75
   icc_news: 0.98
   ptc_news: 0.98
+  chrobinson_news: 0.98
 
 watchlists:
   tech_entities:
@@ -161,6 +162,18 @@ collectors:
     url: https://www.sec.gov/Archives/edgar/data/857005/000119312526413124/d174191dex991.htm
     single_article: true
     article_title: Schneider Electric to acquire PTC in $22.6 billion deal
+    limit: 1
+    editorial_limit: 1
+  - name: chrobinson_news
+    type: newsroom
+    enabled: true
+    category: finance
+    edition_sector: Deals & regulation
+    editorial_type: announcement
+    url: https://www.sec.gov/Archives/edgar/data/1929561/000119312526413211/d115124d425.htm
+    single_article: true
+    article_title: C.H. Robinson to acquire RXO in $5.8 billion transaction
+    max_chars: 60000
     limit: 1
     editorial_limit: 1
   - name: guardian

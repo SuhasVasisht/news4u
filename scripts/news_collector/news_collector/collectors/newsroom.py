@@ -44,6 +44,8 @@ class NewsroomCollector(BaseCollector):
             if not published:
                 return []
             body = extract_text_from_html(response.text, url) or main.text(separator="\n")
+            max_chars = int(self.context.config.get("max_chars", 100000))
+            body = body[:max_chars]
             return [RawItem(source=self.name, source_type="scrape", category=self.category,
                 title=title, url=url, published_at=published, text=body, summary=body[:800],
                 image_url=extract_image_from_page_html(response.text, url),
