@@ -192,6 +192,38 @@ def reconsider_announcements(review, history, output, checklist=None, findings=N
         review["selection"] = selection.model_dump(mode="json")
 
 
+def prune_optional_audit_failures(root, review, history, checklist, request, report, output, date):
+    """Drop held optional stories only when their removal leaves coverage valid."""
+    pruned = prunable_optional_ids(report, checklist)
+    selected = review["selection"]["selected_ids"]
+    if not pruned or len(selected) <= len(pruned):
+        return None
+    print(f"Dropping {len(pruned)} optional stories held by the final audit", flush=True)
+    review["selection"]["selected_ids"] = [key for key in selected if key not in pruned]
+    review["selection"].setdefault("excluded", []).extend(
+        {"id": key, "reason": "Held by the independent final factual audit; omitted without replacement"}
+        for key in pruned)
+    updated = audit_request(review, history, checklist)
+    kept = [story for story in report.review.stories if story.id not in pruned]
+    if any(set(pruned).intersection(item.story_ids) for item in report.review.coverage):
+        return None
+    envelope = {"requestHash": updated["requestHash"],
+                "reviewer": f"{report.reviewer}; fail-closed optional-story pruning",
+                "reviewedAt": datetime.now(timezone.utc).isoformat(),
+                "review": {"stories": [story.model_dump(mode="json") for story in kept],
+                           "coverage": [item.model_dump(mode="json") for item in report.review.coverage]}}
+    result = validate_audit(envelope, updated)
+    atomic_json(output / "quality-review-request.json", updated)
+    atomic_json(output / "quality-review-response.json", envelope)
+    atomic_json(output / "quality-audit.json", result.model_dump(mode="json"))
+    atomic_json(root / "data/quality/history" / f"{date}-{updated['requestHash']}.json",
+                result.model_dump(mode="json"))
+    if result.status == "passed":
+        review["finalAudit"] = {"checklist": checklist, "envelope": envelope}
+        atomic_json(output / "latest.json", review)
+    return result
+
+
 def run_quality_review(root, review, checklist_file=None, audit_file=None, _repair_attempt=0,
                       _previous_audit=None):
     output = root / "data/editorial"
@@ -291,6 +323,13 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
     payload = report.model_dump(mode="json")
     atomic_json(output / "quality-audit.json", payload)
     atomic_json(root / "data/quality/history" / f"{date}-{request['requestHash']}.json", payload)
+    if report.status == "blocked" and not audit_file and _repair_attempt:
+        pruned_report = prune_optional_audit_failures(
+            root, review, history, checklist, request, report, output, date)
+        if pruned_report:
+            if pruned_report.status == "passed":
+                return pruned_report
+            report = pruned_report
     if report.status == "blocked" and not audit_file and _repair_attempt == 0:
         ids = repairable_ids(report)
         missing_selection = [item.model_dump(mode="json") for item in report.review.coverage

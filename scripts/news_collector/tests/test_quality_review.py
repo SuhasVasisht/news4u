@@ -8,7 +8,7 @@ from news_collector.pipeline.publication_history import history_hash
 from news_collector.pipeline.quality_review import audit_request, normalize_batch_ids, verify_final_audit
 from news_collector.pipeline import quality_review
 from test_edition_audit import fixture, NOW
-from news_collector.pipeline.edition_audit import AuditReview, CoverageAuditReview, StoryAuditReview
+from news_collector.pipeline.edition_audit import AuditReview, CoverageAuditReview, StoryAuditReview, build_audit_request, validate_audit
 from test_editorial import decision as editorial_decision
 
 
@@ -201,3 +201,47 @@ def test_bounded_recheck_applies_first_audit_claim_findings(tmp_path, monkeypatc
     assert len(audits) == 2
     assert correction_inputs[0]["findings"][0]["claims"][0]["verdict"] == "unsupported"
     assert audits[1][0]["decisions"][0]["headline"] == "The bank cut rates today"
+
+
+def test_held_optional_story_is_pruned_when_must_cover_mapping_stays_valid(tmp_path, monkeypatch):
+    request, envelope = fixture()
+    review = reviewed_fixture()
+    review.pop("finalAudit")
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW
+    monkeypatch.setattr(quality_review, "datetime", Clock)
+    monkeypatch.setattr("news_collector.pipeline.edition_audit.datetime", Clock)
+    first = review["packets"][0]
+    second = {**first, "id": "b", "url": "https://example.org/second",
+              "chunks": [{"id": "p2", "text": "The bank cut rates today."}]}
+    first_decision = {**review["decisions"]["a"]}
+    second_decision = {**first_decision, "id": "b", "headline": "Bank cut rates today"}
+    second_story = deepcopy(envelope["review"]["stories"][0])
+    second_story.update(id="b", event_key="separate-bank-event")
+    second_story["claims"] = [
+        {**second_story["claims"][0], "passage": second_decision["headline"], "evidence": ["p2"]},
+        {**second_story["claims"][1], "evidence": ["p2"]},
+    ]
+    audit_request_data = build_audit_request(
+        [first, second], [first_decision, second_decision], {"selected_ids": ["a", "b"]},
+        [], request["checklist"], NOW)
+    blocked = deepcopy(envelope)
+    blocked["requestHash"] = audit_request_data["requestHash"]
+    blocked["review"]["stories"].append(second_story)
+    blocked["review"]["stories"][0]["verdict"] = "hold"
+    blocked["review"]["stories"][0]["claims"][0]["verdict"] = "unsupported"
+    blocked["review"]["coverage"][0]["story_ids"] = ["b"]
+    report = validate_audit(blocked, audit_request_data, NOW)
+    review["packets"] = [first, second]
+    review["decisions"] = {"a": first_decision, "b": second_decision}
+    review["selection"] = {"selected_ids": ["a", "b"], "excluded": []}
+
+    pruned = quality_review.prune_optional_audit_failures(
+        tmp_path, review, [], request["checklist"], audit_request_data, report,
+        tmp_path / "data/editorial", "2026-09-10")
+
+    assert pruned.status == "passed"
+    assert review["selection"]["selected_ids"] == ["b"]
+    assert review["finalAudit"]["envelope"]["review"]["stories"][0]["id"] == "b"
