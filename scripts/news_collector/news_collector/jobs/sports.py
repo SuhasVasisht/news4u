@@ -36,8 +36,21 @@ def review_candidates(request, prompt, output):
             batch = offset // REVIEW_BATCH_SIZE + 1
             total = (len(group_packets) + REVIEW_BATCH_SIZE - 1) // REVIEW_BATCH_SIZE
             print(f"Sports review: {group}, batch {batch}/{total}, {len(packets)} candidates", flush=True)
-            result = SportsReview.model_validate_json(cache.read_text()) if cache.exists() else codex_review(payload, prompt, output, SportsReview)
-            validate_decisions(result, packets)
+            result = None
+            if cache.exists():
+                try:
+                    result = SportsReview.model_validate_json(cache.read_text())
+                    validate_decisions(result, packets)
+                except ValueError as exc:
+                    # A cache entry is reusable only while its evidence contract
+                    # remains valid. Discard stale/malformed output and ask the
+                    # normal bounded-retry reviewer to regenerate the batch.
+                    print(f"Discarding invalid cached sports review: {str(exc)[:300]}", flush=True)
+                    cache.unlink()
+                    result = None
+            if result is None:
+                result = codex_review(payload, prompt, output, SportsReview)
+                validate_decisions(result, packets)
             write_json(cache, result.model_dump(mode="json"))
             decisions.extend(result.decisions)
     return SportsReview(decisions=decisions)

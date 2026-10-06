@@ -30,6 +30,24 @@ def test_incomplete_sports_review_is_not_cached(tmp_path, monkeypatch):
     assert not list(tmp_path.glob("review-*.json"))
 
 
+def test_invalid_cached_evidence_is_discarded_and_regenerated(tmp_path, monkeypatch):
+    candidate = {**packet(), "sportsGroup": "NFL"}
+    request = {"packets": [candidate], "previouslyPublished": []}
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("Review")
+    payload = {"packets": [candidate], "previouslyPublished": []}
+    key = sports.fingerprint({"input": payload, "prompt": prompt.read_text(), "profile": sports.reader_profile(),
+                              "model": __import__("os").environ.get("NEWS_EDITOR_MODEL", "default")})
+    stale = sports.SportsReview(decisions=[decision(id=candidate["id"], evidence=["not-in-packet"])])
+    (tmp_path / f"review-{key}.json").write_text(stale.model_dump_json())
+    calls = []
+    monkeypatch.setattr(sports, "codex_review", lambda *_: calls.append(True) or sports.SportsReview(
+        decisions=[decision(id=candidate["id"])]))
+    result = sports.review_candidates(request, prompt, tmp_path)
+    assert len(calls) == 1
+    assert result.decisions[0].evidence == ["p1"]
+
+
 def test_large_group_is_reviewed_in_bounded_batches(tmp_path, monkeypatch):
     packets = [{**packet(), "id": str(i), "sportsGroup": "Soccer"} for i in range(21)]
     sizes = []
