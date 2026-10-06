@@ -119,8 +119,8 @@ sudo systemctl enable --now news-publisher.timer
 sudo systemctl list-timers news-publisher.timer
 ```
 
-The timer uses America/Los_Angeles explicitly, including DST: 07:05, then every half
-hour through 22:35. `Persistent=true` catches a missed invocation after reboot. Adjust
+The timer uses America/Los_Angeles explicitly, including DST: 07:05, then hourly
+through 22:05. `Persistent=true` catches a missed invocation after reboot. Adjust
 the committed timer or a systemd override if newsletters arrive later. Only one machine
 should own daily scheduling; stop the laptop/legacy scheduler when moving to the VM.
 
@@ -248,3 +248,10 @@ Optional coverage omissions do not trigger a full reselection. After the bounded
 repair, optional factual holds (including incomplete claim audits) are removed;
 any coverage they supported is conservatively marked missing. Required coverage
 and all export/deployment validation gates still block unsafe publication.
+
+An independently approved editorial snapshot can survive a code fix to another
+stage for up to six hours on the same local date. Reuse requires the identical
+editorial policy/model, enabled sources with unchanged input hashes, public
+history and a fully revalidated final audit. A changed binding starts a new desk.
+Sports subclasses receive the same exact ID and evidence schema constraints as
+news reviews; validation feedback identifies the allowed individual chunk IDs.

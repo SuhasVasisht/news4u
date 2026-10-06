@@ -3,6 +3,9 @@ from news_collector.runtime import build_runtime
 import argparse
 import json
 import os
+import hashlib
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 
 def prepare_editorial(repository, settings, config, args):
@@ -18,10 +21,44 @@ def prepare_editorial(repository, settings, config, args):
             latest = output / "latest.json"
             if latest.exists():
                 progress = json.loads(latest.read_text())
-                if (progress.get("generatedAt") == saved["review"].get("generatedAt")
+                if (progress.get("generatedAt") and progress.get("generatedAt") == saved["review"].get("generatedAt")
                         and progress.get("historyHash") == saved["review"].get("historyHash")):
                     return progress
             return saved["review"]
+    latest = output / "latest.json"
+    if can_resume and latest.exists():
+        # Code fixes to another stage must not discard an already approved desk.
+        # Revalidate its policy, source snapshot, history, date and complete audit.
+        from news_collector.pipeline.editorial import POLICY_VERSION, reader_profile, source_hash, ReviewBatch, validate_decisions
+        from news_collector.pipeline.publication_history import load_history, history_hash
+        from news_collector.pipeline.quality_review import verify_final_audit
+        try:
+            approved = json.loads(latest.read_text())
+            now = datetime.now(timezone.utc)
+            cutoff = datetime.fromisoformat(approved["cutoff"])
+            profile = reader_profile()
+            date = now.astimezone(ZoneInfo(profile["timezone"])).date().isoformat()
+            prompt = (settings.project_root / "config/editorial-prompt.md").read_text()
+            policy = hashlib.sha256((POLICY_VERSION + prompt + json.dumps(profile, sort_keys=True)
+                + os.environ.get("NEWS_EDITOR_MODEL", "default")
+                + os.environ.get("NEWS_EDITOR_REASONING_EFFORT", "default")).encode()).hexdigest()
+            history = load_history(settings.project_root.parent.parent, date)
+            enabled = {c["name"] for c in config["collectors"] if c.get("enabled", True)}
+            current = {(r["source"], r["canonical_url"]): source_hash(r)
+                       for r in repository.fetch_recent_items(limit_hours=30 * 24)}
+            if (approved.get("finalAudit") and approved["policy"] == policy
+                    and approved["historyHash"] == history_hash(history)
+                    and cutoff.astimezone(ZoneInfo(profile["timezone"])).date().isoformat() == date
+                    and timedelta(0) <= now - cutoff < timedelta(hours=6)
+                    and all(p["source"] in enabled and p.get("inputHash")
+                            == current.get((p["source"], p["url"])) for p in approved["packets"])):
+                validate_decisions(ReviewBatch(decisions=list(approved["decisions"].values())), approved["packets"])
+                verify_final_audit(approved, history, now)
+                print("Resuming the independently approved editorial snapshot after policy/source/history validation", flush=True)
+                atomic_json(marker, {"key": key, "review": approved})
+                return approved
+        except (ValueError, KeyError):
+            pass  # Changed/incomplete approval requires the normal fresh desk.
     result = run_editorial(repository, settings, config, review_file=args.review_file, prepare_only=args.prepare_review)
     if can_resume:
         atomic_json(marker, {"key": key, "review": result})

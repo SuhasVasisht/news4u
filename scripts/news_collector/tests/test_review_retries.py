@@ -211,3 +211,24 @@ def test_completed_batches_survive_a_later_failure(tmp_path, monkeypatch):
     assert len(result["decisions"]) == 10
     assert result["pending"] == 5
     assert not (tmp_path / "data/editorial/latest.json").exists()
+
+
+def test_sports_subclass_schema_constrains_exact_evidence_and_retry_explains_ids(tmp_path, monkeypatch):
+    from news_collector.jobs.sports import SportsReview
+    calls = []
+    monkeypatch.setattr(editorial.shutil, 'which', lambda _: '/bin/codex')
+    def run(command, **kwargs):
+        schema = json.loads(editorial.Path(command[command.index('--output-schema') + 1]).read_text())
+        assert schema['$defs']['Decision']['properties']['id']['enum'] == [packet()['id']]
+        for name in ('Decision', 'NoteSection'):
+            assert schema['$defs'][name]['properties']['evidence']['items']['enum'] == ['p1']
+        calls.append(kwargs['input'])
+        item = decision(evidence=['one:p1']) if len(calls) == 1 else decision()
+        editorial.Path(command[command.index('-o') + 1]).write_text(SportsReview(decisions=[item]).model_dump_json())
+        return SimpleNamespace(returncode=0, stderr='')
+    monkeypatch.setattr(editorial.subprocess, 'run', run)
+    prompt = tmp_path / 'sports.md'
+    prompt.write_text('Sports review')
+    assert editorial.codex_review({'packets': [packet()]}, prompt, tmp_path, SportsReview).decisions
+    assert len(calls) == 2
+    assert "use only individual chunk IDs: ['p1']" in calls[1]

@@ -56,6 +56,8 @@ def test_coverage_failure_preserves_story_checks_but_changed_evidence_invalidate
         quality.run_batched_audit(request, prompt, tmp_path, [])
     assert quality.run_batched_audit(request, prompt, tmp_path, []).coverage
     assert calls.count('story_claims') == 1
+    assert quality.run_batched_audit(request, prompt, tmp_path, []).coverage
+    assert calls.count('coverage_reconciliation') == 2  # one invalid, one cached valid
     changed = deepcopy(request)
     changed['packets'][0]['chunks'][0]['text'] += ' Additional evidence.'
     changed = build_audit_request(changed['packets'], changed['decisions'], changed['selection'], changed['history'], changed['checklist'], NOW, [])
@@ -77,3 +79,52 @@ def test_publisher_resumes_repaired_draft_without_reverting_to_original(tmp_path
     assert job.prepare_editorial(None, settings, {}, args) == repaired
     latest.write_text(json.dumps({**repaired, 'historyHash': 'different-history'}))
     assert job.prepare_editorial(None, settings, {}, args) == original
+
+
+@pytest.mark.parametrize('changed', [None, 'source', 'policy', 'history', 'audit', 'expired'])
+def test_approved_snapshot_survives_other_stage_fixes_only_when_all_bindings_hold(tmp_path, monkeypatch, changed):
+    import hashlib
+    import json
+    from datetime import timedelta
+    from test_editorial import packet, decision, row
+    from news_collector.pipeline import editorial
+    from news_collector.pipeline import publication_history
+    settings = SimpleNamespace(project_root=tmp_path / 'scripts/news_collector')
+    prompt = settings.project_root / 'config/editorial-prompt.md'
+    prompt.parent.mkdir(parents=True)
+    prompt.write_text('Policy')
+    profile = editorial.reader_profile()
+    policy = hashlib.sha256((editorial.POLICY_VERSION + 'Policy' + json.dumps(profile, sort_keys=True)
+        + 'default' + 'default').encode()).hexdigest()
+    monkeypatch.delenv('NEWS_EDITOR_MODEL', raising=False)
+    monkeypatch.delenv('NEWS_EDITOR_REASONING_EFFORT', raising=False)
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW
+    monkeypatch.setattr(job, 'datetime', Clock)
+    monkeypatch.setenv('NEWS_EDITORIAL_RUN_KEY', 'new-code-run')
+    source = row()
+    p = {**packet(), 'inputHash': editorial.source_hash(source)}
+    approved = dict(policy=policy, cutoff=NOW.isoformat(), generatedAt=NOW.isoformat(),
+                    historyHash=publication_history.history_hash([]), packets=[p],
+                    decisions={'one': decision().model_dump()}, finalAudit={'approved': True})
+    if changed == 'policy': approved['policy'] = 'old-policy'
+    if changed == 'history': approved['historyHash'] = 'different-history'
+    if changed == 'expired': approved['cutoff'] = (NOW - timedelta(hours=7)).isoformat()
+    if changed == 'source': source['title'] = 'Changed report'
+    latest = tmp_path / 'data/editorial/latest.json'
+    latest.parent.mkdir(parents=True)
+    latest.write_text(json.dumps(approved))
+    repository = SimpleNamespace(fetch_recent_items=lambda **kw: [source])
+    monkeypatch.setattr(publication_history, 'load_history', lambda *a: [])
+    verified = []
+    def verify(review, history, now):
+        verified.append(review)
+        if changed == 'audit': raise ValueError('Blocked audit')
+    monkeypatch.setattr(quality, 'verify_final_audit', verify)
+    monkeypatch.setattr(job, 'run_editorial', lambda *a, **kw: {'fresh': True})
+    result = job.prepare_editorial(repository, settings, {'collectors': [{'name': p['source']}]},
+                                   SimpleNamespace(prepare_review=False, review_file=None))
+    assert result == (approved if changed is None else {'fresh': True})
+    assert bool(verified) == (changed in (None, 'audit'))

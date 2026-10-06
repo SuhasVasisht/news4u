@@ -234,9 +234,16 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
         root = Path(directory)
         schema = root / "schema.json"
         contract = review_schema(result_type)
-        if result_type is ReviewBatch:
+        if issubclass(result_type, ReviewBatch):
             candidates = packets if isinstance(packets, list) else packets["packets"]
             contract["$defs"]["Decision"]["properties"]["id"]["enum"] = [p["id"] for p in candidates]
+            refs = sorted({chunk["id"] for p in candidates for chunk in p["chunks"]})
+            for name in ("Decision", "NoteSection"):
+                evidence = contract["$defs"][name]["properties"]["evidence"]
+                if refs:
+                    evidence["items"]["enum"] = refs
+                else:
+                    evidence["maxItems"] = 0
         elif result_type is EditionSelection:
             ids = [p["id"] for p in packets["shortlist"]]
             contract = {"type": "object", "additionalProperties": False,
@@ -381,7 +388,7 @@ def validate_decisions(reviewed, packets):
         if decision.duplicate_of and decision.duplicate_of not in known:
             raise ValueError("Unknown duplicate reference")
         if not set(decision.evidence).issubset(refs) or any(not set(s.evidence).issubset(refs) for s in decision.sections):
-            raise ValueError("Invalid evidence reference")
+            raise ValueError(f"Invalid evidence reference for {decision.id}; use only individual chunk IDs: {sorted(refs)}")
         if decision.decision == "admit":
             if not decision.evidence or not decision.summary or not decision.headline or packet["wordCount"] < 80:
                 raise ValueError("Admitted story lacks evidence")

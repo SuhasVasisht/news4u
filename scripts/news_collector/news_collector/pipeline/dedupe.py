@@ -17,27 +17,30 @@ def _is_homepage_url(url: str) -> bool:
 
 def cluster_items(rows: Iterable[dict]) -> list[StoryCluster]:
     groups: list[list[dict]] = []
+    # Parse each row once. Date/JSON/title parsing inside the pairwise loop made
+    # a normal daily collection spend minutes of CPU on unchanged inputs.
+    rows = list(rows)
+    metadata = {id(row): (normalize_title(row["title"]),
+                         set(json.loads(row["entities_json"])),
+                         set(json.loads(row["symbols_json"])),
+                         parse_datetime(row.get("published_at")),
+                         _is_homepage_url(row["canonical_url"])) for row in rows}
     for row in rows:
         placed = False
-        row_title = normalize_title(row["title"])
-        row_entities = set(json.loads(row["entities_json"]))
+        row_title, row_entities, row_symbols, row_date, row_homepage = metadata[id(row)]
         for group in groups:
             candidate = group[0]
-            row_date = parse_datetime(row.get("published_at"))
-            candidate_date = parse_datetime(candidate.get("published_at"))
-            score = fuzz.ratio(row_title, normalize_title(candidate["title"]))
-            candidate_entities = set(json.loads(candidate["entities_json"]))
-            candidate_symbols = set(json.loads(candidate["symbols_json"]))
-            row_symbols = set(json.loads(row["symbols_json"]))
+            candidate_title, candidate_entities, candidate_symbols, candidate_date, _ = metadata[id(candidate)]
+            score = fuzz.ratio(row_title, candidate_title)
             homepage_overlap = bool((row_entities & candidate_entities) or (row_symbols & candidate_symbols))
             if row["canonical_url"] == candidate["canonical_url"] and (
-                not _is_homepage_url(row["canonical_url"]) or (score >= 85 and homepage_overlap)
+                not row_homepage or (score >= 85 and homepage_overlap)
             ):
                 group.append(row)
                 placed = True
                 break
             if (
-                _is_homepage_url(row["canonical_url"])
+                row_homepage
                 and row["canonical_url"] == candidate["canonical_url"]
                 and not homepage_overlap
             ):
