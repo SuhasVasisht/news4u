@@ -223,6 +223,10 @@ def source_hash(row):
 
 
 def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, allow_web=False, validate_result=None):
+    from .editor_availability import quota_path, active_quota_block, record_quota_error
+    quota_file = quota_path(output_dir)
+    if active_quota_block(quota_file):
+        raise RuntimeError("Editor account usage is exhausted; fund the account before retrying. See editor-quota.json")
     executable = shutil.which(os.environ.get("NEWS_EDITOR_CODEX_BIN", "codex"))
     if not executable:
         raise RuntimeError("Codex CLI required for editorial review. Previous paper retained.")
@@ -311,6 +315,7 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
                 print(f"Editor temporarily unavailable; retrying the same model in {delay}s", flush=True)
                 time.sleep(delay)
             if run.returncode or not result_path.exists():
+                record_quota_error(run.stderr, quota_file)
                 raise RuntimeError(f"Editorial review failed (exit {run.returncode}); previous paper retained. {run.stderr[-400:]}")
             response = result_path.read_text()
             (response_dir / f"{prompt_path.stem}-{key}-{attempt}.json").write_text(response)

@@ -220,3 +220,12 @@ without a recent, verified source for a material development. Discovery uses the
 shared bounded review runner. Internal chunk markers and Markdown formatting are
 normalized before selection and factual auditing; evidence links remain in the
 review records and no factual claims are rewritten by that normalization.
+
+Hard Codex account exhaustion is recorded in ignored `data/editor-quota.json`.
+The scheduler reports `blocked` with the reset time and stops before collection or
+further model calls while that block is active. Transient model capacity remains
+separate and uses bounded retries. After adding credits or changing the funded
+editor login, run `npm run publish:daily -- --retry-editor` once to clear the
+operational block and test availability. Do not clear it repeatedly without
+restoring capacity. A known reset time clears the block automatically when due;
+unknown resets require explicit recovery. Already-live editions remain no-ops.

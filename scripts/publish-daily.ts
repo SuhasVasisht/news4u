@@ -1,7 +1,7 @@
 import { publisherStdio } from "./lib/publisher-stdio";
 import { execFileSync } from "node:child_process";
 import { loadEnvFile } from "node:process";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat, rm } from "node:fs/promises";
 import path from "node:path";
 import { dateInZone, editionSchema, validateBuildFreshness } from "../src/lib/edition";
 import { atomicJson, readJson, reusable, runStages, type RunState, type Stage } from "./lib/daily-publisher";
@@ -48,6 +48,13 @@ async function main() {
   const date = today();
   const file = path.join(root, "data/publisher-state.json");
   const statusFile = path.join(root, "data/publisher-status.json");
+  const quotaFile = path.join(root, "data/editor-quota.json");
+  process.env.NEWS_EDITOR_QUOTA_FILE = quotaFile;
+  if (process.argv.includes("--retry-editor")) await rm(quotaFile, { force: true });
+  const quotaBlock = async () => {
+    const block = await readJson<{ reason: string; retryAfter: string | null; action: string }>(quotaFile);
+    return block && (!block.retryAfter || new Date(block.retryAfter).getTime() > Date.now()) ? block : undefined;
+  };
   try {
     console.log(`Daily publisher: ${date} (${profile.timezone})`);
     const restored = await restorePublication(root, `https://${config.domain}`);
@@ -73,6 +80,9 @@ async function main() {
     const state: RunState = canResume ? prior! : {
       date, revision, history: restored.fingerprint, startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), completed: [], status: "running",
     };
+    if ((!state.completed.includes("editorial") || !state.completed.includes("sports")) && await quotaBlock()) {
+      throw new Error("Publisher blocked: editor account usage exhausted. Fund the account, then retry with --retry-editor.");
+    }
     const python = process.env.PYTHON_BIN || path.join(root, "scripts/news_collector/.venv/bin/python");
     const cwd = path.join(root, "scripts/news_collector");
     // Fail before spending time collecting if deployment/editor authentication is missing.
@@ -116,7 +126,10 @@ async function main() {
     }, today, { noUpload });
   } catch (error) {
     // Detailed errors go to the private journal. Keep the health file credential-free.
-    await atomicJson(statusFile, { date, status: "failed", checkedAt: new Date().toISOString(), detail: "See publisher journal and publisher-state.json" });
+    const block = await quotaBlock();
+    await atomicJson(statusFile, { date, status: block ? "blocked" : "failed", checkedAt: new Date().toISOString(),
+      detail: block ? block.reason : "See publisher journal and publisher-state.json",
+      ...(block ? { retryAfter: block.retryAfter, action: block.action } : {}) });
     throw error;
   }
 }
