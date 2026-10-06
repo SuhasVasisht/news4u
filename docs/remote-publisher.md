@@ -24,6 +24,11 @@ systemctl --user list-timers news-publisher-user.timer
 journalctl --user -u news-publisher-user.service -n 100 --no-pager
 ```
 
+The native user service fast-forwards `origin/main` immediately before each daily
+run. Tracked local changes, a failed fetch, or a non-fast-forward stops the job
+before collection; do not force-reset the checkout. After changing the committed service
+unit, copy it to `~/.config/systemd/user/` and run `systemctl --user daemon-reload`.
+
 Linger keeps the user service available after logout and boot. Enable only one publisher
 timer; use either this native service or the Docker service below. Stop the legacy
 `news-app-scheduler-1` container when transferring scheduling ownership, without stopping
@@ -187,10 +192,10 @@ state files make failures visible; no email/Slack alert destination is configure
 This is scheduled, retried publishing—not a promise that source outages, account limits,
 or failed factual audits can always be overcome automatically.
 
-To update, disable the timer, wait for the active service to finish, pull with `--ff-only`,
-rebuild the image, rerun the validation command, and re-enable the timer. Do not update
-mid-publication. GitHub Actions builds and tests the Linux image without secrets on each
-push/PR. The VM does not auto-pull untested code. For rollback, rebuild the last good Git
+For a manual update, disable the timer, wait for the active service to finish, pull with
+`--ff-only`, rebuild the image, rerun the validation command, and re-enable the timer. Do
+not update mid-publication. GitHub Actions builds and tests the Linux image without secrets
+on each push/PR. For rollback, rebuild the last good Git
 commit against the same persistent state; do not roll the DB back independently of its
 publication history. A production content rollback requires an explicit reviewed release.
 

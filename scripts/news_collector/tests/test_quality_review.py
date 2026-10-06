@@ -9,6 +9,7 @@ from news_collector.pipeline.quality_review import audit_request, normalize_batc
 from news_collector.pipeline import quality_review
 from test_edition_audit import fixture, NOW
 from news_collector.pipeline.edition_audit import AuditReview, CoverageAuditReview, StoryAuditReview
+from test_editorial import decision as editorial_decision
 
 
 def reviewed_fixture():
@@ -71,7 +72,7 @@ def test_interrupted_request_does_not_reuse_an_older_response(tmp_path, monkeypa
     (output / "quality-review-response.json").write_text(json.dumps(stale))
     monkeypatch.setattr(quality_review, "load_history", lambda *_: [])
     monkeypatch.setattr(quality_review, "discover_coverage", lambda *_: final["checklist"])
-    monkeypatch.setattr(quality_review, "reconsider_announcements", lambda *_: None)
+    monkeypatch.setattr(quality_review, "reconsider_announcements", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(quality_review, "run_batched_audit", lambda *_: AuditReview.model_validate(final["envelope"]["review"]))
     clock = type("Clock", (datetime,), {
         "now": classmethod(lambda cls, tz=None: NOW),
@@ -119,7 +120,7 @@ def test_final_gate_rejects_changes_after_review(target):
         verify_final_audit(review, [], NOW)
 
 
-def test_automatic_recheck_is_bounded_and_never_bypasses_hold(tmp_path, monkeypatch):
+def test_unrepairable_hold_does_not_spend_a_second_audit_or_bypass_publication(tmp_path, monkeypatch):
     review = reviewed_fixture()
     final = review.pop("finalAudit")
     class Clock(datetime):
@@ -134,7 +135,7 @@ def test_automatic_recheck_is_bounded_and_never_bypasses_hold(tmp_path, monkeypa
         checklist_inputs.append(source)
         return final["checklist"]
     monkeypatch.setattr(quality_review, "discover_coverage", coverage)
-    monkeypatch.setattr(quality_review, "reconsider_announcements", lambda *_: None)
+    monkeypatch.setattr(quality_review, "reconsider_announcements", lambda *_args, **_kwargs: None)
     calls = []
     def audit(payload, prompt, output, result_type, *, allow_web=False, validate_result=None):
         assert allow_web
@@ -151,6 +152,52 @@ def test_automatic_recheck_is_bounded_and_never_bypasses_hold(tmp_path, monkeypa
     with pytest.raises(ValueError, match="blocked publication"):
         quality_review.run_quality_review(tmp_path, review)
     assert "finalAudit" not in json.loads((tmp_path / "data/editorial/latest.json").read_text())
-    assert [call["auditMode"] for call in calls] == [
-        "story_claims", "coverage_reconciliation", "coverage_reconciliation"]
-    assert checklist_inputs == [None, tmp_path / "data/editorial/checklist.json"]
+    assert [call["auditMode"] for call in calls] == ["story_claims", "coverage_reconciliation"]
+    assert checklist_inputs == [None]
+
+
+def test_bounded_recheck_applies_first_audit_claim_findings(tmp_path, monkeypatch):
+    review = reviewed_fixture()
+    final = review.pop("finalAudit")
+    review["decisions"]["a"] = editorial_decision(
+        id="a", headline="Bank cuts rates", summary="The bank cut rates today.",
+        points=[], evidence=["p1"]
+    ).model_dump()
+    review["packets"][0].update(wordCount=100, truncated=False, kind="reporting")
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW
+    monkeypatch.setattr(quality_review, "datetime", Clock)
+    monkeypatch.setattr("news_collector.pipeline.edition_audit.datetime", Clock)
+    monkeypatch.setattr(quality_review, "load_history", lambda *_: [])
+    monkeypatch.setattr(quality_review, "discover_coverage", lambda *_: final["checklist"])
+    monkeypatch.setattr(quality_review, "reconsider_announcements", lambda *_args, **_kwargs: None)
+    correction_inputs = []
+    def correct(payload, prompt, output, result_type, **kwargs):
+        correction_inputs.append(payload)
+        original = payload["decisions"][0]
+        return quality_review.ProseCorrections(corrections=[{
+            "id": original["id"], "headline": "The bank cut rates today",
+            "summary": original["summary"], "points": original["points"],
+            "sections": original.get("sections", []), "caveats": original.get("caveats", []),
+        }])
+    monkeypatch.setattr(quality_review, "codex_review", correct)
+    audits = []
+    def audit(request, prompt, output, reused):
+        audits.append((request, reused))
+        result = deepcopy(final["envelope"]["review"])
+        result["stories"][0]["claims"][0]["passage"] = request["decisions"][0]["headline"]
+        if len(audits) == 1:
+            result["stories"][0]["verdict"] = "hold"
+            result["stories"][0]["claims"][0]["verdict"] = "unsupported"
+            result["coverage"][0].update(status="missing", story_ids=[], cause="selection")
+        return AuditReview.model_validate(result)
+    monkeypatch.setattr(quality_review, "run_batched_audit", audit)
+
+    result = quality_review.run_quality_review(tmp_path, review)
+
+    assert result.status == "passed"
+    assert len(audits) == 2
+    assert correction_inputs[0]["findings"][0]["claims"][0]["verdict"] == "unsupported"
+    assert audits[1][0]["decisions"][0]["headline"] == "The bank cut rates today"

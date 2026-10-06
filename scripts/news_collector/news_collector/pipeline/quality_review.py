@@ -192,7 +192,8 @@ def reconsider_announcements(review, history, output, checklist=None, findings=N
         review["selection"] = selection.model_dump(mode="json")
 
 
-def run_quality_review(root, review, checklist_file=None, audit_file=None, _repair_attempt=0):
+def run_quality_review(root, review, checklist_file=None, audit_file=None, _repair_attempt=0,
+                      _previous_audit=None):
     output = root / "data/editorial"
     cutoff = datetime.fromisoformat(review.get("cutoff", review["generatedAt"]))
     profile = reader_profile()
@@ -209,7 +210,10 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
     pruned_with_stale_coverage = False
     previous_path = output / "quality-review-request.json"
     response_path = output / "quality-review-response.json"
-    if not audit_file and previous_path.exists() and response_path.exists():
+    if _previous_audit:
+        previous_request, previous_report = _previous_audit
+        reused = reusable_story_checks(previous_request, request, previous_report)
+    elif not audit_file and previous_path.exists() and response_path.exists():
         previous_request = json.loads(previous_path.read_text())
         previous_response = json.loads(response_path.read_text())
         # An interrupted run can leave a new request beside an older response.
@@ -288,15 +292,30 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
     atomic_json(output / "quality-audit.json", payload)
     atomic_json(root / "data/quality/history" / f"{date}-{request['requestHash']}.json", payload)
     if report.status == "blocked" and not audit_file and _repair_attempt == 0:
-        print("Final audit blocked publication; attempting one bounded repair and recheck", flush=True)
+        ids = repairable_ids(report)
         missing_selection = [item.model_dump(mode="json") for item in report.review.coverage
                              if item.status == "missing" and item.cause == "selection"]
+        if not ids and not missing_selection:
+            require_publishable(report)
+        print("Final audit blocked publication; attempting one bounded repair and recheck", flush=True)
+        if ids:
+            packets = [packet for packet in review["packets"] if packet["id"] in ids]
+            prompt = Path(__file__).resolve().parents[2] / "config/audit-repair-prompt.md"
+            payload = {"packets": packets,
+                       "decisions": [review["decisions"][key] for key in ids],
+                       "findings": [story.model_dump(mode="json") for story in report.review.stories if story.id in ids]}
+            print(f"Repairing {len(ids)} stories with unresolved claims", flush=True)
+            corrections = codex_review(payload, prompt, output, ProseCorrections)
+            repaired = apply_corrections(review["decisions"], corrections, packets)
+            for decision in repaired.decisions:
+                review["decisions"][decision.id] = decision.model_dump(mode="json")
         if missing_selection:
             reconsider_announcements(review, history, output, checklist, findings=missing_selection)
             atomic_json(output / "latest.json", review)
         # Reuse the exact checklist that produced this audit. Rediscovering coverage
         # during a repair can move the goalposts and waste a second research pass.
-        return run_quality_review(root, review, output / "checklist.json", _repair_attempt=1)
+        return run_quality_review(root, review, output / "checklist.json", _repair_attempt=1,
+                                  _previous_audit=(request, report))
     require_publishable(report)
     review["finalAudit"] = {"checklist": checklist, "envelope": envelope}
     atomic_json(output / "latest.json", review)
