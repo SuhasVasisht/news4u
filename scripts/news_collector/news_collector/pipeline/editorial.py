@@ -416,6 +416,16 @@ def run_editorial(repository, settings, config, review_file=None, prepare_only=F
     edition_date = now.astimezone(ZoneInfo(os.environ.get("APP_TIMEZONE", "America/Los_Angeles"))).date().isoformat()
     history = load_history(settings.project_root.parent.parent, edition_date)
     rows = repository.fetch_recent_items(limit_hours=30 * 24)
+    # A source can return a large feed where the newest entries are market noise
+    # and an older, high-signal story would otherwise fall past its candidate cap.
+    def candidate_priority(row):
+        try:
+            score = float(row.get("importance_score") or 0)
+        except (TypeError, ValueError):
+            score = 0
+        published = parse_datetime(row.get("published_at"))
+        return score, published.timestamp() if published else 0
+    rows.sort(key=candidate_priority, reverse=True)
     candidates, excluded, counts, seen = [], [], Counter(), set()
     podcast_sources = set()
     # Per-source bounds keep a high-volume feed from consuming the review budget.

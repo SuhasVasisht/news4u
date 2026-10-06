@@ -213,6 +213,26 @@ def test_configured_candidate_budget_is_not_bypassed_by_previous_snapshot(tmp_pa
     assert set(result["decisions"]) == {"0", "1", "2"}
 
 
+def test_candidate_budget_keeps_highest_importance_items_before_newest(tmp_path, monkeypatch):
+    current = datetime.now(timezone.utc)
+    rows = [row(id=i, canonical_url=f"https://example.com/ranked/{i}",
+                url=f"https://example.com/ranked/{i}", importance_score=score,
+                published_at=(current - timedelta(minutes=i)).isoformat(), raw_json="{}")
+            for i, score in enumerate([0.1, 0.9, 0.8, 0.7, 0.6])]
+    settings = SimpleNamespace(project_root=tmp_path / "scripts/news_collector", user_agent="Test")
+    repository = SimpleNamespace(fetch_recent_items=lambda **kwargs: rows)
+    monkeypatch.setattr(editorial, "content_packet", lambda r, *_: {**packet(), "id": str(r["id"]), "url": r["url"]})
+
+    def review(packets, *args):
+        if args[-1] is editorial.EditionSelection:
+            return editorial.EditionSelection(selected_ids=[p["id"] for p in packets["shortlist"]], excluded=[])
+        return ReviewBatch(decisions=[decision(id=p["id"]) for p in packets])
+
+    monkeypatch.setattr(editorial, "codex_review", review)
+    result = editorial.run_editorial(repository, settings, {"collectors": [{"name": "ars_technica", "editorial_limit": 3}]})
+    assert set(result["decisions"]) == {"1", "2", "3"}
+
+
 def test_prior_publication_is_rejected_again_at_export():
     from news_collector.pipeline.publication_history import history_hash
     history = [{"date": "2026-09-07", "id": "old", "title": "Original report", "url": packet()["url"], "coverage": []}]

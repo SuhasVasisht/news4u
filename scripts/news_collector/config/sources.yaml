@@ -39,6 +39,7 @@ trust_scores:
   doj_antitrust: 0.96
   npr_business: 0.9
   al_jazeera: 0.86
+  mhra_news: 0.98
   krebs_security: 0.9
   ecb_press: 0.98
   dol_claims: 0.98
@@ -132,6 +133,14 @@ collectors:
     url: https://www.sec.gov/rss/news/press.xml
     edition_sector: Deals & regulation
     editorial_type: announcement
+  - name: mhra_news
+    type: rss
+    enabled: true
+    category: tech
+    edition_sector: Deals & regulation
+    editorial_type: announcement
+    url: https://www.gov.uk/government/organisations/medicines-and-healthcare-products-regulatory-agency.atom
+    editorial_limit: 12
   - name: guardian
     type: guardian
     enabled: true
