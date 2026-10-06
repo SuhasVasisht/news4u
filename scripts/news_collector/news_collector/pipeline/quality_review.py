@@ -8,6 +8,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from news_collector.pipeline.coverage_discovery import discover_coverage
+from news_collector.pipeline.publishers import publisher, limit_publishers
 from news_collector.pipeline.edition_audit import (AuditReview, CoverageAuditReview,
     StoryAuditReview, build_audit_request, validate_audit, require_publishable)
 from news_collector.pipeline.editorial import codex_review, reader_profile, ReviewBatch, EditionSelection, validate_decisions
@@ -171,7 +172,7 @@ def reconsider_announcements(review, history, output, checklist=None, findings=N
             review["decisions"][packet["id"]] = decision
             promoted = promoted or decision["decision"] == "admit"
     if promoted or checklist:
-        shortlist = [{**review["decisions"][p["id"]], "source": p["source"], "url": p["url"], "publishedAt": p["publishedAt"]}
+        shortlist = [{**review["decisions"][p["id"]], "source": p["source"], "url": p["url"], "publishedAt": p["publishedAt"], "publisher": publisher(p["url"])}
                      for p in review["packets"] if review["decisions"][p["id"]]["decision"] == "admit"]
         selection_prompt = prompt.with_name("edition-selection-prompt.md")
         payload = {"shortlist": shortlist, "previouslyPublished": history}
@@ -189,7 +190,7 @@ def reconsider_announcements(review, history, output, checklist=None, findings=N
         if len(accounted) != len(set(accounted)) or set(accounted) != {p["id"] for p in shortlist} or len(selection.selected_ids) > 28:
             raise ValueError("Reconsidered selection must account for every admission once, maximum 28")
         atomic_json(cache, selection.model_dump(mode="json"))
-        review["selection"] = selection.model_dump(mode="json")
+        review["selection"] = limit_publishers(selection.model_dump(mode="json"), review["packets"])
 
 
 def prune_optional_audit_failures(root, review, history, checklist, request, report, output, date):
@@ -250,6 +251,7 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
     already_selected = response_path.exists() and json.loads(response_path.read_text()).get("requestHash") == current_hash
     if not audit_file and not already_selected and not _repair_attempt:
         reconsider_announcements(review, history, output, checklist)
+    review["selection"] = limit_publishers(review["selection"], review["packets"])
     request = audit_request(review, history, checklist)
     reused = []
     previous_path = output / "quality-review-request.json"
@@ -263,13 +265,13 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
         # An interrupted run can leave a new request beside an older response.
         # Only reuse a response that is bound to both the saved and current request.
         saved_hash = previous_request.get("requestHash")
-        if (saved_hash == request["requestHash"]
-                and previous_response.get("requestHash") == saved_hash):
+        if previous_response.get("requestHash") == saved_hash:
             previous_report = validate_audit(previous_response, previous_request)
             atomic_json(output / f"audit-record-{previous_report.requestHash}.json",
                         {"request": previous_request, "response": previous_response})
-            pruned_report = prune_optional_audit_failures(
+            pruned_report = (prune_optional_audit_failures(
                 root, review, history, checklist, request, previous_report, output, date)
+                if saved_hash == request["requestHash"] else None)
             if pruned_report and pruned_report.status == "passed":
                 return pruned_report
             request = audit_request(review, history, checklist)

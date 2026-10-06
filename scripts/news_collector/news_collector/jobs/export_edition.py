@@ -16,6 +16,7 @@ from selectolax.parser import HTMLParser
 from rapidfuzz import fuzz
 
 from news_collector.pipeline.dedupe import cluster_items
+from news_collector.pipeline.publishers import publisher
 from news_collector.pipeline.publication_dates import needs_publisher_date
 from news_collector.pipeline.editorial import Decision, exclusion, validate_decisions, ReviewBatch, source_hash, LONGFORM
 from news_collector.runtime import build_runtime
@@ -37,22 +38,6 @@ def public_url(value: str | None) -> str | None:
     return value if parsed.scheme in {"http", "https"} and parsed.hostname and not parsed.username else None
 
 
-def publisher(url: str) -> str:
-    host = (urlparse(url).hostname or "").removeprefix("www.")
-    return {"bbc.com": "BBC", "bbc.co.uk": "BBC", "techcrunch.com": "TechCrunch", "theguardian.com": "The Guardian", "apnews.com": "AP", "arxiv.org": "arXiv", "sec.gov": "SEC", "techmeme.com": "Techmeme", "news.ycombinator.com": "Hacker News",
-            "lennysnewsletter.com": "Lenny's Newsletter", "dwarkesh.com": "Dwarkesh Podcast",
-            "simonwillison.net": "Simon Willison", "interconnects.ai": "Interconnects",
-            "latent.space": "Latent Space", "arstechnica.com": "Ars Technica",
-            "theverge.com": "The Verge", "ft.com": "Financial Times",
-            "federalreserve.gov": "Federal Reserve", "openai.com": "OpenAI",
-            "anthropic.com": "Anthropic", "huggingface.co": "Hugging Face",
-            "deepmind.google": "Google DeepMind", "marketwatch.com": "MarketWatch",
-            "justice.gov": "US Department of Justice", "aljazeera.com": "Al Jazeera",
-            "npr.org": "NPR", "krebsonsecurity.com": "Krebs on Security",
-            "spectrum.ieee.org": "IEEE Spectrum", "macrumors.com": "MacRumors",
-            "alphasignal.ai": "AlphaSignal", "blog.bytebytego.com": "ByteByteGo",
-            "dol.gov": "US Department of Labor", "ecb.europa.eu": "European Central Bank",
-            "salesforce.com": "Salesforce", "hawley.senate.gov": "Senator Hawley's office"}.get(host, host)
 
 
 def build_snapshot(rows: list[dict], now: datetime, timezone_name: str = "America/Los_Angeles") -> tuple[dict, dict]:
@@ -143,13 +128,16 @@ def assemble_reviewed(rows, review, now, timezone_name, history=None, discoverie
     selection_reasons = {item["id"]: item["reason"] for item in review.get("selection", {}).get("excluded", [])}
     for key, decision in decisions.items():
         packet = packets[key]
-        matching = by_url.get(packet["url"], [])
+        if decision.decision != "admit" or key not in review.get("selection", {}).get("selected_ids", review["decisions"]):
+            rejected.append({"id": key, "reason": selection_reasons.get(key, decision.reason)})
+            continue
+        matching = [row for row in by_url.get(packet["url"], []) if row["source"] == packet["source"]]
         row = next((r for r in matching if not packet.get("inputHash") or source_hash(r) == packet["inputHash"]), None)
-        if matching and not row:
+        if not row:
             raise RuntimeError("Source changed since editorial review; review again before publication")
         if row and needs_publisher_date(row) and packet.get("publicationDateBasis") != "publisher_metadata":
             raise RuntimeError("Newsletter-linked article requires publisher date verification; repeat editorial review")
-        if not row or exclusion({**row, "published_at": packet["publishedAt"]}, now) or decision.decision != "admit" or key not in review.get("selection", {}).get("selected_ids", review["decisions"]):
+        if not row or exclusion({**row, "published_at": packet["publishedAt"]}, now):
             rejected.append({"id": key, "reason": selection_reasons.get(key, decision.reason)})
             continue
         prior = prior_match(packet["url"], packet["title"], history or [], edition_date)

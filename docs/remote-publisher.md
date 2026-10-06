@@ -255,3 +255,10 @@ editorial policy/model, enabled selected sources with unchanged input hashes, pu
 history and a fully revalidated final audit. A changed binding starts a new desk.
 Sports subclasses receive the same exact ID and evidence schema constraints as
 news reviews; validation feedback identifies the allowed individual chunk IDs.
+
+Selection and export share one publisher identity (including BBC's multiple feeds
+and domains). The four-story publisher cap is applied before the final audit.
+Removing stories can reuse unchanged factual checks, but coverage is independently
+reconciled; adding stories cannot reuse the old selection's approval. Export
+checks source consistency for selected stories and refuses to silently drop or
+substitute a missing selected source. Changed excluded candidates do not block it.

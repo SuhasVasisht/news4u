@@ -100,3 +100,17 @@ def test_plain_prose_removes_internal_chunk_markers_without_changing_claims():
     result = plain_review_prose(ReviewBatch(decisions=[item])).decisions[0]
     assert result.summary == 'The company said revenue grew 10%. It remains a claim.'
     assert result.evidence == before
+
+
+def test_removal_only_selection_reuses_unchanged_checks_but_added_stories_do_not():
+    request, envelope = fixture()
+    report = validate_audit(envelope, request, NOW)
+    before = deepcopy(request)
+    before['selection']['selected_ids'].append('b')
+    before['packets'].append({**before['packets'][0], 'id': 'b'})
+    before['decisions'].append({**before['decisions'][0], 'id': 'b'})
+    assert [story.id for story in reusable_story_checks(before, request, report)] == ['a']
+    assert reusable_story_checks(request, before, report) == []
+    changed = deepcopy(request)
+    changed['packets'][0]['chunks'][0]['text'] = 'Changed evidence'
+    assert reusable_story_checks(before, changed, report) == []

@@ -54,7 +54,7 @@ def test_export_uses_reviewed_original_date_and_rejects_unverified_newsletter_da
     original = (now - timedelta(hours=24)).isoformat()
     source = row(source="tldr_email", published_at=now.isoformat(),
                  raw_json=json.dumps({"_date_basis": "newsletter_sent_at"}))
-    evidence = {**packet(), "publishedAt": original, "publicationDateBasis": "publisher_metadata"}
+    evidence = {**packet(), "source": source["source"], "publishedAt": original, "publicationDateBasis": "publisher_metadata"}
     review = {"generatedAt": now.isoformat(), "packets": [evidence],
               "decisions": {"one": decision().model_dump()}, "selection": {"selected_ids": ["one"]},
               "excluded": [], "policy": "test"}

@@ -25,6 +25,7 @@ from news_collector.pipeline.extract import extract_text_from_html
 from news_collector.pipeline.structured_output import review_schema
 from news_collector.pipeline.edition_audit import StoryAuditReview
 from news_collector.pipeline.images import download
+from news_collector.pipeline.publishers import publisher, limit_publishers
 from news_collector.utils import parse_datetime
 from news_collector.pipeline.publication_history import load_history, history_hash, prior_match
 from zoneinfo import ZoneInfo
@@ -537,7 +538,7 @@ def run_editorial(repository, settings, config, review_file=None, prepare_only=F
     normalized = plain_review_prose(ReviewBatch(decisions=[Decision.model_validate(d) for d in decisions.values()]))
     decisions = {decision.id: decision.model_dump() for decision in normalized.decisions}
     validate_ranking_review([Decision.model_validate(d) for d in decisions.values()], packets)
-    shortlist = [{**decisions[p["id"]], "source": p["source"], "url": p["url"], "publishedAt": p["publishedAt"]}
+    shortlist = [{**decisions[p["id"]], "source": p["source"], "url": p["url"], "publishedAt": p["publishedAt"], "publisher": publisher(p["url"])}
                  for p in packets if decisions[p["id"]]["decision"] == "admit"]
     selection_key = hashlib.sha256((json.dumps(shortlist, sort_keys=True) + selection_prompt.read_text() + history_hash(history)).encode()).hexdigest()
     selection_path = output / f"selection-{selection_key}.json"
@@ -549,6 +550,7 @@ def run_editorial(repository, settings, config, review_file=None, prepare_only=F
         print("Editorial desk: reviewing the complete proposed edition", flush=True)
         selection = codex_review({"shortlist": shortlist, "previouslyPublished": history}, selection_prompt, output, EditionSelection)
     validate_selection(selection, shortlist)
+    selection = EditionSelection.model_validate(limit_publishers(selection.model_dump(), packets))
     selection_path.write_text(selection.model_dump_json(indent=2))
     payload = {"policy": policy, "cutoff": now.isoformat(), "generatedAt": datetime.now(timezone.utc).isoformat(), "packets": packets,
                "selection": selection.model_dump(),

@@ -77,13 +77,22 @@ def prunable_optional_ids(report, checklist):
 
 
 def reusable_story_checks(previous_request, request, report):
-    # These shared inputs determine novelty, scope and evidence. Changed selection
-    # or history requires a complete new review, not partial verdict reuse.
-    for key in ("policy", "cutoff", "packets", "selection", "history", "checklist"):
+    # Only removal is safe across selection changes: it cannot add claims or
+    # duplicate events. Coverage is reconciled again against the reduced edition.
+    for key in ("policy", "cutoff", "history", "checklist"):
         if previous_request.get(key) != request.get(key):
             return []
+    if not isinstance(request.get("selection"), dict) or not isinstance(request.get("packets"), list):
+        return []
+    before_ids = set(previous_request["selection"]["selected_ids"])
+    after_ids = set(request["selection"]["selected_ids"])
+    if not after_ids <= before_ids:
+        return []
+    before_packets = {p["id"]: p for p in previous_request["packets"]}
+    if any(p != before_packets.get(p["id"]) for p in request["packets"]):
+        return []
     before = {decision["id"]: decision for decision in previous_request["decisions"]}
     after = {decision["id"]: decision for decision in request["decisions"]}
     return [deepcopy(story) for story in report.review.stories
-            if story.verdict == "pass" and before.get(story.id) == after.get(story.id)
+            if story.id in after_ids and story.verdict == "pass" and before.get(story.id) == after.get(story.id)
             and not any(blocker.startswith(f"{story.id}:") for blocker in report.blockers)]
