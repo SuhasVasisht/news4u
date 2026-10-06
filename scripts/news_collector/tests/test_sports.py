@@ -83,7 +83,7 @@ def review_fixture(tmp_path, monkeypatch, number=1):
     monkeypatch.setattr(sports, "config_for", lambda _: {"enabled": True})
     monkeypatch.setattr(sports, "quality_image", lambda *_: {"image": None})
     packets = [{"id": str(i), "url": f"https://www.espn.com/nfl/story/{i}", "title": f"Report {i}", "source": "espn_nfl", "sportsGroup": "NFL", "kind": "reporting", "wordCount": 100, "truncated": False, "chunks": [{"id": "p1", "text": "Evidence " * 100}], "publishedAt": NOW.isoformat(), "basis": "Publisher article"} for i in range(number)]
-    request = {"date": "2026-09-09", "generatedAt": NOW.isoformat(), "packets": packets, "scores": {"checkedAt": NOW.isoformat(), "leagues": []}, "sources": [], "policy": sports.fingerprint({"config": {"enabled": True}, "prompt": "Test policy"}), "historyHash": sports.history_hash([])}
+    request = {"date": "2026-09-09", "generatedAt": NOW.isoformat(), "packets": packets, "scores": {"checkedAt": NOW.isoformat(), "leagues": []}, "sources": [], "policy": sports.fingerprint({"version": sports.SPORTS_REQUEST_VERSION, "config": {"enabled": True}, "prompt": "Test policy"}), "historyHash": sports.history_hash([])}
     request["requestHash"] = sports.fingerprint(request)
     decisions = [{"id": p["id"], "decision": "admit", "quality": 80, "importance": 60, "kind": "reporting", "reason": "Supported", "headline": ["Quarterback returns from injury", "Franchise sale wins approval", "Championship winner announced"][i], "summary": "A concise supported report.", "points": [], "sections": [], "caveats": [], "evidence": ["p1"], "duplicate_of": None} for i, p in enumerate(packets)]
     review = {"requestHash": request["requestHash"], "reviewer": "Test desk", "reviewedAt": NOW.isoformat(), "decisions": decisions, "selection": {"selected_ids": [p["id"] for p in packets], "excluded": []}}
@@ -142,7 +142,7 @@ def test_authorized_carryover_requires_visible_label_and_source_date(tmp_path, m
     config = {"enabled": True, "carryover": {"date": "2026-09-09", "story_ids": ["0"]}}
     monkeypatch.setattr(sports, "config_for", lambda _: config)
     monkeypatch.setattr(sports, "prior_match", lambda *_: {"date": "2026-09-08", "id": "0"})
-    request["policy"] = sports.fingerprint({"config": config, "prompt": "Test policy"})
+    request["policy"] = sports.fingerprint({"version": sports.SPORTS_REQUEST_VERSION, "config": config, "prompt": "Test policy"})
     request["packets"][0]["carryoverFrom"] = "2026-09-08"
     request["packets"][0]["publishedAt"] = "2026-09-08T20:00:00-07:00"
     request["requestHash"] = sports.fingerprint({k: v for k, v in request.items() if k != "requestHash"})
@@ -164,7 +164,7 @@ def test_sports_request_bindings_are_checked_before_reusing_work(tmp_path, monke
     monkeypatch.setattr(sports, 'config_for', lambda *_: {'enabled': True})
     monkeypatch.setattr(sports, 'load_history', lambda *_: [])
     request = {'date': '2026-09-09', 'generatedAt': NOW.isoformat(), 'historyHash': history_hash([]),
-               'policy': sports.fingerprint({'config': {'enabled': True}, 'prompt': 'Current policy'})}
+               'policy': sports.fingerprint({'version': sports.SPORTS_REQUEST_VERSION, 'config': {'enabled': True}, 'prompt': 'Current policy'})}
     if changed == 'policy': request['policy'] = 'old-policy'
     if changed == 'history': request['historyHash'] = 'old-history'
     if changed == 'date': request['date'] = '2026-09-08'
@@ -175,3 +175,20 @@ def test_sports_request_bindings_are_checked_before_reusing_work(tmp_path, monke
             sports.validate_sports_request(request, settings, NOW, 'America/Los_Angeles')
     else:
         assert sports.validate_sports_request(request, settings, NOW, 'America/Los_Angeles') == []
+
+
+def test_scoreboards_use_individual_days_and_merge_duplicate_provider_events(monkeypatch):
+    calls = []
+    def get(client, url, params=None):
+        if url.endswith('/scoreboard'):
+            calls.append(params['dates'])
+            assert len(params['dates']) == 8 and params['dates'].isdigit()
+            return {'events': [event()], 'leagues': [{'season': {'displayName': '2026'}}]}
+        return {'children': [{'name': 'Division', 'standings': {'entries': [standing_entry('First', 1)]}}]}
+    monkeypatch.setattr(sports, 'get_json', get)
+    result, health = sports.collect_scores({'leagues': [{'id': 'nfl', 'group': 'NFL', 'name': 'NFL',
+        'path': 'football/nfl', 'url': 'https://www.espn.com/nfl/scoreboard'}]}, NOW, None)
+    assert calls == ['20260909', '20260910', '20260911']
+    assert len(result['leagues'][0]['games']) == 1
+    assert result['leagues'][0]['scheduleStatus'] == 'ok'
+    assert all(item['status'] == 'ok' for item in health)

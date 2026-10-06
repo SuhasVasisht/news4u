@@ -38,6 +38,7 @@ async function codeRevision(root: string) {
 async function main() {
   const root = process.cwd();
   const noUpload = process.argv.includes("--no-upload");
+  const reviseToday = process.argv.includes("--revise-today");
   for (const file of [".env", ".env.newsletters"]) {
     try { loadEnvFile(path.join(root, file)); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
@@ -64,7 +65,8 @@ async function main() {
     const restored = await restorePublication(root, `https://${config.domain}`);
     if (restored.manifest.date > date) throw new Error("Production is ahead of this machine's date; check its clock.");
     const prior = await readJson<RunState>(file);
-    if (restored.manifest.date === date) {
+    if (reviseToday && restored.manifest.date !== date) throw new Error("--revise-today requires today's edition to be already published");
+    if (restored.manifest.date === date && !reviseToday) {
       // An upload can succeed even when its process loses the response. Finish browser
       // verification of our exact bundle before declaring that attempt successful.
       if (prior?.date === date && prior.active === "deploy" && prior.status !== "published") {
@@ -124,10 +126,10 @@ async function main() {
         if (hash(await fetchPublic(`https://${config.domain}/edition-manifest.json`)) !== state.history) throw new Error("Production changed during this run; retry to refresh publication history");
         if (noUpload) {
           const secrets = Object.entries(process.env).filter(([key]) => /KEY|TOKEN|SECRET|PASSWORD/i.test(key)).flatMap(([, value]) => value ? [value] : []);
-          const { bundle } = await prepareRelease(root, secrets);
+          const { bundle } = await prepareRelease(root, secrets, { reviseToday });
           await verifyLocalRelease(root, bundle);
           console.log("Full rehearsal passed local release verification. Nothing was uploaded.");
-        } else script("scripts/deploy-cloudflare.ts", [], 30 * 60_000);
+        } else script("scripts/deploy-cloudflare.ts", reviseToday ? ["--revise-today"] : [], 30 * 60_000);
       }
     }, async state => {
       state.artifacts = await checkpointArtifacts(state);

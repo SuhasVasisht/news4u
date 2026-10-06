@@ -268,3 +268,11 @@ batches. It selects IDs only, removes alternate accounts of the same event, and
 keeps genuinely distinct developments involving the same player or club. League
 limits are enforced afterwards. This avoids relying solely on similar headlines;
 the existing evidence and source/date validations still apply to published prose.
+
+To repair an already-published current edition, use the same guarded pipeline:
+`npm run publish:daily -- --revise-today --no-upload`, inspect the rehearsal, then
+`npm run publish:daily -- --revise-today`. The second command resumes validated
+checkpoints; the archive retains the original edition as a revision. Ordinary
+timer runs remain same-day no-ops. ESPN scoreboards are requested one calendar
+day at a time and merged by provider event ID because date-range requests can
+return HTTP 400. A versioned sports request invalidates older cached formats.

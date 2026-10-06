@@ -18,6 +18,8 @@ from news_collector.pipeline.images import download, quality_image
 from news_collector.pipeline.publication_history import load_history, prior_match, history_hash
 from news_collector.utils import canonicalize_url, parse_datetime
 
+SPORTS_REQUEST_VERSION = 2
+
 LIMITS = {"NFL": 2, "Soccer": 3, "NBA": 2, "Elsewhere": 2}
 NOISE = re.compile(r"\b(fantasy|betting|odds|picks|power rankings|tiers|predictions|follow live|live updates|grading the move|offseason recap|early.season preview|transfer rumo\w*|gossip|talking points|as opener nears)\b", re.I)
 
@@ -108,7 +110,8 @@ def standings_tables(payload, group):
 
 def collect_scores(config, now, client):
     start, end = now - timedelta(hours=24), now + timedelta(hours=24)
-    dates = f"{start:%Y%m%d}-{end:%Y%m%d}"
+    dates = [(start + timedelta(days=i)).strftime("%Y%m%d")
+             for i in range((end.date() - start.date()).days + 1)]
     leagues, health = [], []
     for league in config["leagues"]:
         result = {k: league[k] for k in ["id", "group", "name", "url"]}
@@ -118,9 +121,15 @@ def collect_scores(config, now, client):
             error = None
             try:
                 if kind == "scoreboard":
-                    data = get_json(client, f"https://site.api.espn.com/apis/site/v2/sports/{league['path']}/scoreboard", {"dates": dates, "limit": 100})
-                    result["games"] = score_games(data, start, end, now)
-                    result["season"] = str((data.get("leagues") or [{}])[0].get("season", {}).get("displayName", ""))
+                    events = []
+                    for date in dates:
+                        data = get_json(client, f"https://site.api.espn.com/apis/site/v2/sports/{league['path']}/scoreboard", {"dates": date, "limit": 100})
+                        if not isinstance(data.get("events"), list):
+                            raise ValueError("Scoreboard missing events array")
+                        events.extend(data["events"])
+                        season = str((data.get("leagues") or [{}])[0].get("season", {}).get("displayName", ""))
+                        result["season"] = season or result["season"]
+                    result["games"] = score_games({"events": events}, start, end, now)
                 else:
                     data = get_json(client, f"https://site.api.espn.com/apis/v2/sports/{league['path']}/standings")
                     result["tables"] = standings_tables(data, league["group"])
@@ -206,7 +215,7 @@ def prepare_sports(settings, repository, now, zone):
     prompt = (settings.project_root / "config/sports-prompt.md").read_text()
     request = {"generatedAt": now.isoformat(), "date": now.astimezone(ZoneInfo(zone)).date().isoformat(), "timezone": zone,
                "packets": packets, "scores": scores, "sources": health + score_health, "historyHash": history_hash(history), "previouslyPublished": history,
-               "policy": fingerprint({"config": config, "prompt": prompt})}
+               "policy": fingerprint({"version": SPORTS_REQUEST_VERSION, "config": config, "prompt": prompt})}
     request["requestHash"] = fingerprint(request)
     return request
 
@@ -218,7 +227,7 @@ def validate_sports_request(request, settings, now, zone):
         raise ValueError("Prepare fresh sports data for today before applying review")
     if request["requestHash"] != fingerprint({k: v for k, v in request.items() if k != "requestHash"}):
         raise ValueError("Sports request integrity check failed")
-    policy = fingerprint({"config": config_for(settings), "prompt": (settings.project_root / "config/sports-prompt.md").read_text()})
+    policy = fingerprint({"version": SPORTS_REQUEST_VERSION, "config": config_for(settings), "prompt": (settings.project_root / "config/sports-prompt.md").read_text()})
     history = load_history(settings.project_root.parent.parent, today)
     if policy != request["policy"] or history_hash(history) != request["historyHash"]:
         raise ValueError("Sports policy or publication history changed; prepare again")
