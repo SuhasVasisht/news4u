@@ -102,10 +102,8 @@ def test_cli_isolated_live_research_and_fail_closed(monkeypatch, tmp_path):
 def test_old_background_cannot_create_a_daily_must_cover_requirement():
     payload = checklist()
     payload['events'][0]['sources'][0]['publishedAt'] = (NOW - timedelta(days=8)).isoformat()
-    with pytest.raises(ValueError, match='48-hour news window'):
-        discovery.validate_checklist(payload, NOW, {})
-    payload['events'][0]['mustCover'] = False
-    assert discovery.validate_checklist(payload, NOW, {})
+    result = discovery.validate_checklist(payload, NOW, {})
+    assert result['events'][0]['mustCover'] is False
 
 
 def test_current_discovery_reused_but_stale_research_requires_a_new_call(tmp_path, monkeypatch):
