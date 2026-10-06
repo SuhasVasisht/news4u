@@ -44,6 +44,8 @@ trust_scores:
   ecb_press: 0.98
   dol_claims: 0.98
   hawley_oversight: 0.75
+  icc_news: 0.98
+  ptc_news: 0.98
 
 watchlists:
   tech_entities:
@@ -141,6 +143,25 @@ collectors:
     editorial_type: announcement
     url: https://www.gov.uk/government/organisations/medicines-and-healthcare-products-regulatory-agency.atom
     editorial_limit: 12
+  - name: icc_news
+    type: rss
+    enabled: true
+    category: world
+    edition_sector: World
+    editorial_type: announcement
+    url: https://www.icc-cpi.int/rss/news/all
+    limit: 20
+    editorial_limit: 12
+  - name: ptc_news
+    type: newsroom
+    enabled: true
+    category: finance
+    edition_sector: Deals & regulation
+    editorial_type: announcement
+    url: https://www.ptc.com/en/news/2026/schneider-electric-to-acquire-ptc
+    single_article: true
+    limit: 1
+    editorial_limit: 1
   - name: guardian
     type: guardian
     enabled: true
@@ -150,6 +171,7 @@ collectors:
       - us-news
       - business
       - technology
+    editorial_limit: 12
   - name: hackernews
     type: hackernews
     enabled: true

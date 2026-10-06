@@ -18,6 +18,36 @@ class NewsroomCollector(BaseCollector):
         response = self.client.get(base)
         response.raise_for_status()
         page = HTMLParser(response.text)
+        # Some publishers expose only an article URL, not an RSS feed. Allow an
+        # explicitly configured single article page to be ingested as evidence.
+        if self.context.config.get("single_article"):
+            heading = page.css_first("h1")
+            main = page.css_first("main") or page.css_first("article") or page.body
+            if not heading or not main:
+                return []
+            canonical = page.css_first('link[rel="canonical"]')
+            url = canonical.attributes.get("href") if canonical else base
+            published = None
+            for selector, attribute in [("meta[property='article:published_time']", "content"),
+                                        ("meta[name='date']", "content"),
+                                        ("time[datetime]", "datetime")]:
+                node = page.css_first(selector)
+                if node and node.attributes.get(attribute):
+                    published = parse_datetime(node.attributes[attribute])
+                    if published:
+                        break
+            if not published:
+                text = main.text(separator="\n")
+                date = re.search(r"\b[A-Z][a-z]{2,8} \d{1,2}, 20\d{2}\b", text)
+                published = parse_datetime(date.group()) if date else None
+            if not published:
+                return []
+            body = extract_text_from_html(response.text, url) or main.text(separator="\n")
+            return [RawItem(source=self.name, source_type="scrape", category=self.category,
+                title=heading.text(), url=url, published_at=published, text=body, summary=body[:800],
+                image_url=extract_image_from_page_html(response.text, url),
+                raw={"_editorial_type": self.context.config.get("editorial_type", "announcement"),
+                     "_edition_sector": self.context.config.get("edition_sector")})]
         links = {}
         for anchor in page.css("a[href]"):
             url = urljoin(base, anchor.attributes["href"])
