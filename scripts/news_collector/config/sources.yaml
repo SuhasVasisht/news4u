@@ -179,6 +179,7 @@ collectors:
     type: alphavantage_news
     enabled: true
     category: finance
+    editorial_limit: 64
     topics:
       - technology
       - financial_markets
