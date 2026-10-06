@@ -152,3 +152,26 @@ def test_authorized_carryover_requires_visible_label_and_source_date(tmp_path, m
     review["decisions"][0]["summary"] = "From yesterday's late edition: A concise supported report."
     result = sports.publish_sports(request, review, settings, None, NOW, "America/Los_Angeles")
     assert result["stories"][0]["publishedAt"] == "2026-09-08T20:00:00-07:00"
+
+
+@pytest.mark.parametrize('changed', [None, 'policy', 'history', 'integrity', 'date'])
+def test_sports_request_bindings_are_checked_before_reusing_work(tmp_path, monkeypatch, changed):
+    from news_collector.pipeline.publication_history import history_hash
+    settings = SimpleNamespace(project_root=tmp_path / 'scripts/news_collector')
+    prompt = settings.project_root / 'config/sports-prompt.md'
+    prompt.parent.mkdir(parents=True)
+    prompt.write_text('Current policy')
+    monkeypatch.setattr(sports, 'config_for', lambda *_: {'enabled': True})
+    monkeypatch.setattr(sports, 'load_history', lambda *_: [])
+    request = {'date': '2026-09-09', 'generatedAt': NOW.isoformat(), 'historyHash': history_hash([]),
+               'policy': sports.fingerprint({'config': {'enabled': True}, 'prompt': 'Current policy'})}
+    if changed == 'policy': request['policy'] = 'old-policy'
+    if changed == 'history': request['historyHash'] = 'old-history'
+    if changed == 'date': request['date'] = '2026-09-08'
+    request['requestHash'] = sports.fingerprint(request)
+    if changed == 'integrity': request['policy'] = 'tampered'
+    if changed:
+        with pytest.raises(ValueError):
+            sports.validate_sports_request(request, settings, NOW, 'America/Los_Angeles')
+    else:
+        assert sports.validate_sports_request(request, settings, NOW, 'America/Los_Angeles') == []

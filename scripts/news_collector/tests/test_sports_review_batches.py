@@ -88,3 +88,32 @@ def test_final_selection_removes_cross_batch_duplicate_event():
         "a": {"sportsGroup": "Soccer"}, "b": {"sportsGroup": "Soccer"}})
     assert selected["selected_ids"] == ["a"]
     assert selected["excluded"][0]["id"] == "b"
+
+
+def test_stale_request_is_regenerated_before_any_model_review(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+    settings = SimpleNamespace(project_root=tmp_path / 'scripts/news_collector')
+    output = tmp_path / 'data/sports'
+    output.mkdir(parents=True)
+    (output / 'review-request.json').write_text(json.dumps({'policy': 'old'}))
+    calls = []
+    monkeypatch.setattr('sys.argv', ['sports-job'])
+    monkeypatch.setattr(sports, 'build_runtime', lambda: (settings, {}, None, None))
+    monkeypatch.setattr(sports, 'config_for', lambda *_: {'enabled': True})
+    def validate(*args):
+        calls.append('validate')
+        raise ValueError('Sports policy changed')
+    monkeypatch.setattr(sports, 'validate_sports_request', validate)
+    def prepare(*args):
+        calls.append('prepare')
+        return {'policy': 'new', 'packets': [], 'requestHash': 'fresh'}
+    monkeypatch.setattr(sports, 'prepare_sports', prepare)
+    def review(request, *args):
+        assert request['policy'] == 'new'
+        calls.append('review')
+        return sports.SportsReview(decisions=[])
+    monkeypatch.setattr(sports, 'review_candidates', review)
+    monkeypatch.setattr(sports, 'publish_sports', lambda *args: {'stories': [], 'sports': {'checkedAt': 'now'}})
+    sports.main()
+    assert calls == ['validate', 'prepare', 'review']

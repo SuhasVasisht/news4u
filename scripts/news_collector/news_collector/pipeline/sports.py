@@ -211,10 +211,10 @@ def prepare_sports(settings, repository, now, zone):
     return request
 
 
-def publish_sports(request, review, settings, repository, now, zone):
-    from news_collector.jobs.export_edition import publisher
+def validate_sports_request(request, settings, now, zone):
     today = now.astimezone(ZoneInfo(zone)).date().isoformat()
-    if request["date"] != today or not timedelta(0) <= now - parse_datetime(request["generatedAt"]) <= timedelta(hours=6):
+    generated = parse_datetime(request.get("generatedAt"))
+    if request.get("date") != today or not generated or not timedelta(0) <= now - generated <= timedelta(hours=6):
         raise ValueError("Prepare fresh sports data for today before applying review")
     if request["requestHash"] != fingerprint({k: v for k, v in request.items() if k != "requestHash"}):
         raise ValueError("Sports request integrity check failed")
@@ -222,6 +222,13 @@ def publish_sports(request, review, settings, repository, now, zone):
     history = load_history(settings.project_root.parent.parent, today)
     if policy != request["policy"] or history_hash(history) != request["historyHash"]:
         raise ValueError("Sports policy or publication history changed; prepare again")
+    return history
+
+
+def publish_sports(request, review, settings, repository, now, zone):
+    from news_collector.jobs.export_edition import publisher
+    history = validate_sports_request(request, settings, now, zone)
+    today = now.astimezone(ZoneInfo(zone)).date().isoformat()
     reviewed = validate_external_review(review, request["requestHash"], request["packets"], now)
     decisions = {d.id: d for d in reviewed.decisions}
     admitted = {d.id for d in reviewed.decisions if d.decision == "admit"}

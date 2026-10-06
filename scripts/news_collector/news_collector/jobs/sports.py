@@ -1,14 +1,12 @@
 import argparse
 import json
 import os
-from datetime import datetime, timezone, timedelta
-from zoneinfo import ZoneInfo
+from datetime import datetime, timezone
 from rapidfuzz import fuzz
 
 from news_collector.runtime import build_runtime
 from news_collector.pipeline.editorial import codex_review, ReviewBatch, validate_decisions, reader_profile
-from news_collector.pipeline.sports import LIMITS, prepare_sports, publish_sports, write_json, config_for, fingerprint
-from news_collector.utils import parse_datetime
+from news_collector.pipeline.sports import LIMITS, prepare_sports, publish_sports, write_json, config_for, fingerprint, validate_sports_request
 
 
 class SportsReview(ReviewBatch):
@@ -92,11 +90,11 @@ def main():
         req_file = output / "review-request.json"
         if not args.prepare_review and req_file.exists():
             cached_req = json.loads(req_file.read_text())
-            gen = parse_datetime(cached_req.get("generatedAt"))
-            today = now.astimezone(ZoneInfo(zone)).date().isoformat()
-            if cached_req.get("date") == today and gen and timedelta(0) <= now - gen <= timedelta(hours=6):
+            try:
+                validate_sports_request(cached_req, settings, now, zone)
                 request = cached_req
-            else:
+            except (ValueError, KeyError, TypeError):
+                print("Regenerating sports request after date, policy, history or integrity changed", flush=True)
                 request = prepare_sports(settings, repository, now, zone)
                 write_json(req_file, request)
         else:
