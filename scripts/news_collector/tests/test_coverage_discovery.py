@@ -49,15 +49,13 @@ def test_research_can_finish_after_the_selection_cutoff():
     payload["checkedAt"] = (NOW + timedelta(hours=1)).isoformat()
     assert discovery.validate_checklist(payload, NOW, {}, now=NOW + timedelta(hours=1))
     payload["events"][0]["sources"][0]["publishedAt"] = (NOW + timedelta(minutes=20)).isoformat()
-    with pytest.raises(ValueError, match="after cutoff"):
-        discovery.validate_checklist(payload, NOW, {}, now=NOW + timedelta(hours=1))
+    assert discovery.validate_checklist(payload, NOW, {}, now=NOW + timedelta(hours=1))["events"] == []
 
 
-def test_rejects_future_source_and_empty_queries():
+def test_excludes_future_source_and_rejects_empty_queries():
     payload = checklist()
     payload["events"][0]["sources"][0]["publishedAt"] = "2026-09-12T00:00:00Z"
-    with pytest.raises(ValueError):
-        discovery.validate_checklist(payload, NOW, {})
+    assert discovery.validate_checklist(payload, NOW, {})["events"] == []
     payload = checklist()
     payload["queries"] = [" "]
     with pytest.raises(ValueError):
@@ -104,6 +102,20 @@ def test_old_background_cannot_create_a_daily_must_cover_requirement():
     payload['events'][0]['sources'][0]['publishedAt'] = (NOW - timedelta(days=8)).isoformat()
     result = discovery.validate_checklist(payload, NOW, {})
     assert result['events'][0]['mustCover'] is False
+
+
+def test_sources_after_cutoff_are_excluded_without_aborting_the_checklist():
+    payload = checklist()
+    payload['events'][0]['sources'][0]['publishedAt'] = (NOW + timedelta(minutes=10)).isoformat()
+    result = discovery.validate_checklist(payload, NOW, {})
+    assert result['events'] == []
+
+
+def test_naive_source_date_is_excluded_without_aborting_the_checklist():
+    payload = checklist()
+    payload['events'][0]['sources'][0]['publishedAt'] = '2026-09-10T09:00:00'
+    result = discovery.validate_checklist(payload, NOW, {})
+    assert result['events'] == []
 
 
 def test_current_discovery_reused_but_stale_research_requires_a_new_call(tmp_path, monkeypatch):

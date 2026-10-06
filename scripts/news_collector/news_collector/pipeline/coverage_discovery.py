@@ -26,14 +26,22 @@ def validate_checklist(payload, cutoff, profile, now=None):
         raise ValueError("Discovery requires a researcher, real scope and research queries")
     if len({event.id for event in checklist.events}) != len(checklist.events):
         raise ValueError("Discovery event IDs must be unique")
+    eligible_events = []
     for event in checklist.events:
-        for source in event.sources:
-            if source.publishedAt.tzinfo is None or source.publishedAt > min(cutoff, checked) + timedelta(minutes=5):
-                raise ValueError("Discovery source publication date is naive or after cutoff")
+        # Research can return a guessed or just-after-cutoff timestamp. Such
+        # sources cannot establish today's coverage requirement; discard them
+        # instead of failing an otherwise usable edition.
+        event.sources = [source for source in event.sources
+                         if source.publishedAt.tzinfo is not None
+                         and source.publishedAt <= min(cutoff, checked) + timedelta(minutes=5)]
+        if not event.sources:
+            continue
         # A stale background item can remain useful context, but it must not be
         # allowed to block today's edition as a must-cover event.
         if event.mustCover and not any(source.publishedAt >= cutoff - timedelta(hours=48) for source in event.sources):
             event.mustCover = False
+        eligible_events.append(event)
+    checklist.events = eligible_events
     return checklist.model_dump(mode="json")
 
 
