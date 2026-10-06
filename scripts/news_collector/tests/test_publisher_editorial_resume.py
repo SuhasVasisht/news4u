@@ -81,7 +81,7 @@ def test_publisher_resumes_repaired_draft_without_reverting_to_original(tmp_path
     assert job.prepare_editorial(None, settings, {}, args) == original
 
 
-@pytest.mark.parametrize('changed', [None, 'source', 'policy', 'history', 'audit', 'expired'])
+@pytest.mark.parametrize('changed', [None, 'source', 'policy', 'history', 'audit', 'expired', 'unselected-source'])
 def test_approved_snapshot_survives_other_stage_fixes_only_when_all_bindings_hold(tmp_path, monkeypatch, changed):
     import hashlib
     import json
@@ -108,7 +108,7 @@ def test_approved_snapshot_survives_other_stage_fixes_only_when_all_bindings_hol
     p = {**packet(), 'inputHash': editorial.source_hash(source)}
     approved = dict(policy=policy, cutoff=NOW.isoformat(), generatedAt=NOW.isoformat(),
                     historyHash=publication_history.history_hash([]), packets=[p],
-                    decisions={'one': decision().model_dump()}, finalAudit={'approved': True})
+                    decisions={'one': decision().model_dump()}, selection={'selected_ids': ['one']}, finalAudit={'approved': True})
     if changed == 'policy': approved['policy'] = 'old-policy'
     if changed == 'history': approved['historyHash'] = 'different-history'
     if changed == 'expired': approved['cutoff'] = (NOW - timedelta(hours=7)).isoformat()
@@ -116,7 +116,16 @@ def test_approved_snapshot_survives_other_stage_fixes_only_when_all_bindings_hol
     latest = tmp_path / 'data/editorial/latest.json'
     latest.parent.mkdir(parents=True)
     latest.write_text(json.dumps(approved))
-    repository = SimpleNamespace(fetch_recent_items=lambda **kw: [source])
+    rows = [source]
+    if changed == 'unselected-source':
+        old = row(id=2, canonical_url='https://example.com/other', title='Older optional candidate')
+        approved['packets'].append({**packet(), 'id': 'two', 'url': old['canonical_url'], 'inputHash': editorial.source_hash(old)})
+        approved['decisions']['two'] = decision(id='two', decision='hold').model_dump()
+        rows.append({**old, 'title': 'Changed optional candidate'})
+        latest.write_text(json.dumps(approved))
+    # A duplicate historical record must not displace the newest selected source.
+    rows.append({**source, 'title': 'Old historical version'})
+    repository = SimpleNamespace(fetch_recent_items=lambda **kw: rows)
     monkeypatch.setattr(publication_history, 'load_history', lambda *a: [])
     verified = []
     def verify(review, history, now):
@@ -126,5 +135,5 @@ def test_approved_snapshot_survives_other_stage_fixes_only_when_all_bindings_hol
     monkeypatch.setattr(job, 'run_editorial', lambda *a, **kw: {'fresh': True})
     result = job.prepare_editorial(repository, settings, {'collectors': [{'name': p['source']}]},
                                    SimpleNamespace(prepare_review=False, review_file=None))
-    assert result == (approved if changed is None else {'fresh': True})
-    assert bool(verified) == (changed in (None, 'audit'))
+    assert result == (approved if changed in (None, 'unselected-source') else {'fresh': True})
+    assert bool(verified) == (changed in (None, 'audit', 'unselected-source'))

@@ -44,14 +44,18 @@ def prepare_editorial(repository, settings, config, args):
                 + os.environ.get("NEWS_EDITOR_REASONING_EFFORT", "default")).encode()).hexdigest()
             history = load_history(settings.project_root.parent.parent, date)
             enabled = {c["name"] for c in config["collectors"] if c.get("enabled", True)}
-            current = {(r["source"], r["canonical_url"]): source_hash(r)
-                       for r in repository.fetch_recent_items(limit_hours=30 * 24)}
+            current = {}
+            for row in repository.fetch_recent_items(limit_hours=30 * 24):
+                # Repository order puts the newest record first. An older copy
+                # of the same URL must not overwrite its current input hash.
+                current.setdefault((row["source"], row["canonical_url"]), source_hash(row))
+            selected = set(approved["selection"]["selected_ids"])
             if (approved.get("finalAudit") and approved["policy"] == policy
                     and approved["historyHash"] == history_hash(history)
                     and cutoff.astimezone(ZoneInfo(profile["timezone"])).date().isoformat() == date
                     and timedelta(0) <= now - cutoff < timedelta(hours=6)
                     and all(p["source"] in enabled and p.get("inputHash")
-                            == current.get((p["source"], p["url"])) for p in approved["packets"])):
+                            == current.get((p["source"], p["url"])) for p in approved["packets"] if p["id"] in selected)):
                 validate_decisions(ReviewBatch(decisions=list(approved["decisions"].values())), approved["packets"])
                 verify_final_audit(approved, history, now)
                 print("Resuming the independently approved editorial snapshot after policy/source/history validation", flush=True)

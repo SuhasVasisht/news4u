@@ -251,7 +251,7 @@ and all export/deployment validation gates still block unsafe publication.
 
 An independently approved editorial snapshot can survive a code fix to another
 stage for up to six hours on the same local date. Reuse requires the identical
-editorial policy/model, enabled sources with unchanged input hashes, public
+editorial policy/model, enabled selected sources with unchanged input hashes, public
 history and a fully revalidated final audit. A changed binding starts a new desk.
 Sports subclasses receive the same exact ID and evidence schema constraints as
 news reviews; validation feedback identifies the allowed individual chunk IDs.
