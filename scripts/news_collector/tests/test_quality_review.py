@@ -203,7 +203,8 @@ def test_bounded_recheck_applies_first_audit_claim_findings(tmp_path, monkeypatc
     assert audits[1][0]["decisions"][0]["headline"] == "The bank cut rates today"
 
 
-def test_held_optional_story_is_pruned_when_must_cover_mapping_stays_valid(tmp_path, monkeypatch):
+@pytest.mark.parametrize("mapped_optional", [False, True])
+def test_held_optional_story_is_pruned_when_must_cover_mapping_stays_valid(tmp_path, monkeypatch, mapped_optional):
     request, envelope = fixture()
     review = reviewed_fixture()
     review.pop("finalAudit")
@@ -233,6 +234,13 @@ def test_held_optional_story_is_pruned_when_must_cover_mapping_stays_valid(tmp_p
     blocked["review"]["stories"][0]["verdict"] = "hold"
     blocked["review"]["stories"][0]["claims"][0]["verdict"] = "unsupported"
     blocked["review"]["coverage"][0]["story_ids"] = ["b"]
+    if mapped_optional:
+        audit_request_data["checklist"]["events"][0]["mustCover"] = False
+        blocked["review"]["coverage"][0]["story_ids"] = ["a"]
+        body = {key: value for key, value in audit_request_data.items() if key != "requestHash"}
+        import hashlib
+        audit_request_data["requestHash"] = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+        blocked["requestHash"] = audit_request_data["requestHash"]
     report = validate_audit(blocked, audit_request_data, NOW)
     review["packets"] = [first, second]
     review["decisions"] = {"a": first_decision, "b": second_decision}
@@ -245,3 +253,14 @@ def test_held_optional_story_is_pruned_when_must_cover_mapping_stays_valid(tmp_p
     assert pruned.status == "passed"
     assert review["selection"]["selected_ids"] == ["b"]
     assert review["finalAudit"]["envelope"]["review"]["stories"][0]["id"] == "b"
+
+
+def test_incomplete_claim_audit_is_prunable_even_when_verdict_says_pass():
+    from news_collector.pipeline.audit_repair import prunable_optional_ids
+    request, envelope = fixture()
+    report = validate_audit(envelope, request, NOW)
+    report.blockers = ["a: headline, summary, points or notes lack claim checks"]
+    request["checklist"]["events"][0]["mustCover"] = False
+    assert prunable_optional_ids(report, request["checklist"]) == ["a"]
+    request["checklist"]["events"][0]["mustCover"] = True
+    assert prunable_optional_ids(report, request["checklist"]) == []

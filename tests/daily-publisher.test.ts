@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reusable, runStages, type RunState, type Stage } from "../scripts/lib/daily-publisher";
+import { reusable, runStages, reserveAttempt, type RunState, type Stage } from "../scripts/lib/daily-publisher";
 
 const state = (): RunState => ({ date: "2026-10-04", revision: "code", history: "history", startedAt: "2026-10-04T14:00:00Z", updatedAt: "2026-10-04T14:00:00Z", completed: [], status: "running" });
 describe("daily publishing recovery", () => {
@@ -46,4 +46,15 @@ describe("daily publishing recovery", () => {
     await expect(runStages(run, async stage => { calls.push(stage); }, async () => {}, () => "2026-10-05")).rejects.toThrow("midnight");
     expect(calls).toEqual([]);
   });
+});
+
+
+it("bounds daily retries independently of checkpoint restarts and resets on the next date", () => {
+  const first = reserveAttempt(undefined, "2026-10-06", "revision", new Date("2026-10-06T14:00:00Z"));
+  expect(() => reserveAttempt(first, first.date, first.revision, new Date("2026-10-06T14:30:00Z"))).toThrow("cooling down");
+  const second = reserveAttempt(first, first.date, first.revision, new Date("2026-10-06T15:00:00Z"));
+  const third = reserveAttempt(second, first.date, first.revision, new Date("2026-10-06T16:00:00Z"));
+  expect(() => reserveAttempt(third, first.date, first.revision, new Date("2026-10-06T17:00:00Z"))).toThrow("budget exhausted");
+  expect(reserveAttempt(third, "2026-10-07", first.revision, new Date("2026-10-07T14:00:00Z")).attempts).toBe(1);
+  expect(reserveAttempt(third, first.date, "fixed-revision", new Date("2026-10-06T17:00:00Z")).attempts).toBe(1);
 });

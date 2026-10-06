@@ -1,4 +1,5 @@
 """Independent discovery and a final factual/coverage gate for the daily build."""
+from copy import deepcopy
 from datetime import datetime, timezone
 import json
 import hashlib
@@ -133,8 +134,7 @@ def run_batched_audit(request, prompt, output, reused, batch_size=5):
             "reviewedAt": datetime.now(timezone.utc).isoformat(),
             "review": {"stories": [s.model_dump(mode="json") for s in all_story_reviews],
                        "coverage": [c.model_dump(mode="json") for c in result.coverage]}}, request)
-    coverage = codex_review(coverage_payload, prompt, output, CoverageAuditReview,
-                           allow_web=True, validate_result=validate_coverage)
+    coverage = cached_audit(coverage_payload, prompt, output, CoverageAuditReview, validate_coverage)
     validate_coverage(coverage)
     return AuditReview(stories=all_story_reviews, coverage=coverage.coverage)
 
@@ -199,20 +199,32 @@ def prune_optional_audit_failures(root, review, history, checklist, request, rep
     if not pruned or len(selected) <= len(pruned):
         return None
     print(f"Dropping {len(pruned)} optional stories held by the final audit", flush=True)
+    original = review
+    review = deepcopy(review)
     review["selection"]["selected_ids"] = [key for key in selected if key not in pruned]
     review["selection"].setdefault("excluded", []).extend(
         {"id": key, "reason": "Held by the independent final factual audit; omitted without replacement"}
         for key in pruned)
     updated = audit_request(review, history, checklist)
     kept = [story for story in report.review.stories if story.id not in pruned]
-    if any(set(pruned).intersection(item.story_ids) for item in report.review.coverage):
-        return None
+    coverage = deepcopy(report.review.coverage)
+    for item in coverage:
+        if set(pruned).intersection(item.story_ids):
+            # A removed factual hold cannot support coverage, even when another
+            # mapped story remains. Record the omission conservatively.
+            item.story_ids = []
+            item.status = "missing"
+            item.cause = "selection"
+            item.reason = "Coverage removed because its selected story failed the independent factual audit."
+
     envelope = {"requestHash": updated["requestHash"],
                 "reviewer": f"{report.reviewer}; fail-closed optional-story pruning",
                 "reviewedAt": datetime.now(timezone.utc).isoformat(),
                 "review": {"stories": [story.model_dump(mode="json") for story in kept],
-                           "coverage": [item.model_dump(mode="json") for item in report.review.coverage]}}
+                           "coverage": [item.model_dump(mode="json") for item in coverage]}}
     result = validate_audit(envelope, updated)
+    original.clear()
+    original.update(review)
     atomic_json(output / "quality-review-request.json", updated)
     atomic_json(output / "quality-review-response.json", envelope)
     atomic_json(output / "quality-audit.json", result.model_dump(mode="json"))
@@ -220,6 +232,7 @@ def prune_optional_audit_failures(root, review, history, checklist, request, rep
                 result.model_dump(mode="json"))
     if result.status == "passed":
         review["finalAudit"] = {"checklist": checklist, "envelope": envelope}
+        original["finalAudit"] = review["finalAudit"]
         atomic_json(output / "latest.json", review)
     return result
 
@@ -239,7 +252,6 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
         reconsider_announcements(review, history, output, checklist)
     request = audit_request(review, history, checklist)
     reused = []
-    pruned_with_stale_coverage = False
     previous_path = output / "quality-review-request.json"
     response_path = output / "quality-review-response.json"
     if _previous_audit:
@@ -256,55 +268,12 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
             previous_report = validate_audit(previous_response, previous_request)
             atomic_json(output / f"audit-record-{previous_report.requestHash}.json",
                         {"request": previous_request, "response": previous_response})
-            pruned = prunable_optional_ids(previous_report, checklist)
-            if pruned:
-                print(f"Dropping {len(pruned)} optional stories held by the final audit; no replacements added", flush=True)
-                review["selection"]["selected_ids"] = [key for key in review["selection"]["selected_ids"] if key not in pruned]
-                review["selection"].setdefault("excluded", []).extend(
-                    {"id": key, "reason": "Held by the independent final factual audit; omitted without replacement"}
-                    for key in pruned)
-                request = audit_request(review, history, checklist)
-                kept = [story for story in previous_report.review.stories if story.id not in pruned]
-                envelope = {"requestHash": request["requestHash"],
-                            "reviewer": f"{previous_report.reviewer}; fail-closed optional-story pruning",
-                            "reviewedAt": datetime.now(timezone.utc).isoformat(),
-                            "review": {"stories": [story.model_dump(mode="json") for story in kept],
-                                       "coverage": [item.model_dump(mode="json") for item in previous_report.review.coverage]}}
-                coverage_stale = any(set(pruned).intersection(item.story_ids)
-                                     for item in previous_report.review.coverage)
-                if not coverage_stale:
-                    atomic_json(output / "quality-review-request.json", request)
-                    atomic_json(output / "quality-review-response.json", envelope)
-                    report = validate_audit(envelope, request)
-                    if report.status == "passed":
-                        atomic_json(output / "quality-audit.json", report.model_dump(mode="json"))
-                        atomic_json(root / "data/quality/history" / f"{date}-{request['requestHash']}.json",
-                                    report.model_dump(mode="json"))
-                        review["finalAudit"] = {"checklist": checklist, "envelope": envelope}
-                        atomic_json(output / "latest.json", review)
-                        return report
-                # A mapped optional story was removed, so its old coverage result
-                # is invalid. Reuse only passing story checks and reassess coverage.
-                reused = [story for story in kept if story.verdict == "pass"
-                          and all(claim.verdict == "supported" for claim in story.claims)]
-                pruned_with_stale_coverage = coverage_stale
-                if not coverage_stale:
-                    previous_report = report
-                    previous_request = request
-            ids = [] if pruned_with_stale_coverage else repairable_ids(previous_report)
-            if ids:
-                prompt = Path(__file__).resolve().parents[2] / "config/audit-repair-prompt.md"
-                packets = [packet for packet in review["packets"] if packet["id"] in ids]
-                payload = {"packets": packets, "decisions": [review["decisions"][key] for key in ids],
-                           "findings": [story.model_dump(mode="json") for story in previous_report.review.stories if story.id in ids]}
-                print(f"Repairing {len(ids)} stories with unresolved claims", flush=True)
-                corrections = codex_review(payload, prompt, output, ProseCorrections)
-                repaired = apply_corrections(review["decisions"], corrections, packets)
-                for decision in repaired.decisions:
-                    review["decisions"][decision.id] = decision.model_dump(mode="json")
-                request = audit_request(review, history, checklist)
-            if not pruned_with_stale_coverage:
-                reused = reusable_story_checks(previous_request, request, previous_report)
+            pruned_report = prune_optional_audit_failures(
+                root, review, history, checklist, request, previous_report, output, date)
+            if pruned_report and pruned_report.status == "passed":
+                return pruned_report
+            request = audit_request(review, history, checklist)
+            reused = reusable_story_checks(previous_request, request, previous_report)
     if not audit_file:
         review.pop("finalAudit", None)
         atomic_json(output / "latest.json", review)
@@ -333,9 +302,15 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
     if report.status == "blocked" and not audit_file and _repair_attempt == 0:
         ids = repairable_ids(report)
         missing_selection = [item.model_dump(mode="json") for item in report.review.coverage
-                             if item.status == "missing" and item.cause == "selection"]
+                             if item.status == "missing" and item.cause == "selection"
+                             and any(event["id"] == item.event_id and event["mustCover"]
+                                     for event in checklist["events"])]
         if not ids and not missing_selection:
-            require_publishable(report)
+            pruned_report = prune_optional_audit_failures(
+                root, review, history, checklist, request, report, output, date)
+            if pruned_report and pruned_report.status == "passed":
+                return pruned_report
+            require_publishable(pruned_report or report)
         print("Final audit blocked publication; attempting one bounded repair and recheck", flush=True)
         if ids:
             packets = [packet for packet in review["packets"] if packet["id"] in ids]
@@ -351,6 +326,7 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
         if missing_selection:
             reconsider_announcements(review, history, output, checklist, findings=missing_selection)
             atomic_json(output / "latest.json", review)
+        atomic_json(output / "latest.json", review)
         # Reuse the exact checklist that produced this audit. Rediscovering coverage
         # during a repair can move the goalposts and waste a second research pass.
         return run_quality_review(root, review, output / "checklist.json", _repair_attempt=1,

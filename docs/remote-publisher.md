@@ -234,3 +234,17 @@ editor login, run `npm run publish:daily -- --retry-editor` once to clear the
 operational block and test availability. Do not clear it repeatedly without
 restoring capacity. A known reset time clears the block automatically when due;
 unknown resets require explicit recovery. Already-live editions remain no-ops.
+
+
+Retries are limited to three starts per local edition date and code/model revision,
+with at least one hour between starts. The hourly timer can check for a missing
+edition, but cannot repeatedly spend the editor quota on unchanged failures.
+`data/publisher-attempts.json` is private runtime state. A new date or fixed code
+revision gets a new budget; `--retry-editor` explicitly resets it after an operator
+resolves a blocking account or configuration problem. A successful no-upload
+rehearsal resumes directly at deployment without spending another editorial attempt.
+Editorial retries resume the latest repairs for the same evidence snapshot.
+Optional coverage omissions do not trigger a full reselection. After the bounded
+repair, optional factual holds (including incomplete claim audits) are removed;
+any coverage they supported is conservatively marked missing. Required coverage
+and all export/deployment validation gates still block unsafe publication.

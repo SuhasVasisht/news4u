@@ -15,6 +15,12 @@ def prepare_editorial(repository, settings, config, args):
         saved = json.loads(marker.read_text())
         if saved.get("key") == key:
             print("Resuming the editorial evidence snapshot for this publisher run", flush=True)
+            latest = output / "latest.json"
+            if latest.exists():
+                progress = json.loads(latest.read_text())
+                if (progress.get("generatedAt") == saved["review"].get("generatedAt")
+                        and progress.get("historyHash") == saved["review"].get("historyHash")):
+                    return progress
             return saved["review"]
     result = run_editorial(repository, settings, config, review_file=args.review_file, prepare_only=args.prepare_review)
     if can_resume:

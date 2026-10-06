@@ -59,7 +59,8 @@ def repairable_ids(report):
 
 def prunable_optional_ids(report, checklist):
     failed = {story.id for story in report.review.stories
-              if story.verdict != "pass" or any(claim.verdict != "supported" for claim in story.claims)}
+              if story.verdict != "pass" or any(claim.verdict != "supported" for claim in story.claims)
+              or any(blocker.startswith(f"{story.id}:") for blocker in report.blockers)}
     if not failed:
         return []
     if any(not blocker.startswith("Must-cover event unresolved:")

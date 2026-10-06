@@ -61,3 +61,19 @@ def test_coverage_failure_preserves_story_checks_but_changed_evidence_invalidate
     changed = build_audit_request(changed['packets'], changed['decisions'], changed['selection'], changed['history'], changed['checklist'], NOW, [])
     quality.run_batched_audit(changed, prompt, tmp_path, [])
     assert calls.count('story_claims') == 2
+
+
+def test_publisher_resumes_repaired_draft_without_reverting_to_original(tmp_path, monkeypatch):
+    import json
+    settings = SimpleNamespace(project_root=tmp_path / 'scripts/news_collector')
+    args = SimpleNamespace(prepare_review=False, review_file=None)
+    original = {'generatedAt': NOW.isoformat(), 'historyHash': 'same-history', 'summary': 'original'}
+    monkeypatch.setattr(job, 'run_editorial', lambda *a, **kw: original)
+    monkeypatch.setenv('NEWS_EDITORIAL_RUN_KEY', 'same-run')
+    job.prepare_editorial(None, settings, {}, args)
+    latest = tmp_path / 'data/editorial/latest.json'
+    repaired = {**original, 'summary': 'repaired'}
+    latest.write_text(json.dumps(repaired))
+    assert job.prepare_editorial(None, settings, {}, args) == repaired
+    latest.write_text(json.dumps({**repaired, 'historyHash': 'different-history'}))
+    assert job.prepare_editorial(None, settings, {}, args) == original

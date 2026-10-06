@@ -2,7 +2,7 @@
 Description=Publish from 07:05 Los Angeles time, retry every 30 minutes until 22:35
 
 [Timer]
-OnCalendar=*-*-* 07..22:05,35:00 America/Los_Angeles
+OnCalendar=*-*-* 07..22:05:00 America/Los_Angeles
 Persistent=true
 RandomizedDelaySec=30
 Unit=news-publisher.service

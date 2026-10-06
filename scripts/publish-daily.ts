@@ -4,7 +4,7 @@ import { loadEnvFile } from "node:process";
 import { readFile, readdir, stat, rm } from "node:fs/promises";
 import path from "node:path";
 import { dateInZone, editionSchema, validateBuildFreshness } from "../src/lib/edition";
-import { atomicJson, readJson, reusable, runStages, type RunState, type Stage } from "./lib/daily-publisher";
+import { atomicJson, readJson, reusable, runStages, reserveAttempt, type AttemptBudget, type RunState, type Stage } from "./lib/daily-publisher";
 import { fetchPublic, restorePublication } from "./lib/restore-publication";
 import { hash, releaseFiles, prepareRelease } from "./lib/static-release";
 import { verifyLocalRelease } from "./lib/verify-local-release";
@@ -50,7 +50,11 @@ async function main() {
   const statusFile = path.join(root, "data/publisher-status.json");
   const quotaFile = path.join(root, "data/editor-quota.json");
   process.env.NEWS_EDITOR_QUOTA_FILE = quotaFile;
-  if (process.argv.includes("--retry-editor")) await rm(quotaFile, { force: true });
+  const attemptsFile = path.join(root, "data/publisher-attempts.json");
+  if (process.argv.includes("--retry-editor")) {
+    await rm(quotaFile, { force: true });
+    await rm(attemptsFile, { force: true });
+  }
   const quotaBlock = async () => {
     const block = await readJson<{ reason: string; retryAfter: string | null; action: string }>(quotaFile);
     return block && (!block.retryAfter || new Date(block.retryAfter).getTime() > Date.now()) ? block : undefined;
@@ -89,6 +93,12 @@ async function main() {
     if (!(process.env.CLOUDFLARE_API_TOKEN || process.env.CLOUFLARE_API_KEY) || !(process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CLOUFLARE_ACCOUNT)) throw new Error("Cloudflare credentials are missing");
     if (process.env.NEWS_MAIL_ENABLED !== "1" || !process.env.NEWS_MAIL_USERNAME || !process.env.NEWS_MAIL_PASSWORD) throw new Error("Enable NEWS_MAIL_ENABLED=1 and configure the newsletter mailbox credentials");
     execFileSync(process.env.NEWS_EDITOR_CODEX_BIN || "codex", ["login", "status"], { stdio: publisherStdio(), timeout: 30_000 });
+    // A validated rehearsal only needs deployment; it does not spend another
+    // collection/editorial attempt. Other retries are bounded across checkpoints.
+    if (!state.completed.includes("build")) {
+      const budget = reserveAttempt(await readJson<AttemptBudget>(attemptsFile), date, revision, new Date());
+      await atomicJson(attemptsFile, budget);
+    }
     await runStages(state, async (stage: Stage) => {
       console.log(`Starting ${stage}`);
       if (stage === "collect") {
