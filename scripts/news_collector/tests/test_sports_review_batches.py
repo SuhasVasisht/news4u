@@ -117,3 +117,24 @@ def test_stale_request_is_regenerated_before_any_model_review(tmp_path, monkeypa
     monkeypatch.setattr(sports, 'publish_sports', lambda *args: {'stories': [], 'sports': {'checkedAt': 'now'}})
     sports.main()
     assert calls == ['validate', 'prepare', 'review']
+
+
+def test_final_event_review_handles_different_headlines_and_caches_validated_selection(tmp_path, monkeypatch):
+    from news_collector.pipeline.editorial import EditionSelection
+    first = decision(id='a', headline='Player prepares for final national-team appearance')
+    second = decision(id='b', headline='A celebrated international career reaches its conclusion')
+    packets = [{**packet(), 'id': key, 'sportsGroup': 'Soccer'} for key in ('a', 'b')]
+    request = {'packets': packets, 'previouslyPublished': []}
+    calls = []
+    def review(payload, *args):
+        calls.append(payload)
+        return EditionSelection(selected_ids=['a'], excluded=[{'id': 'b', 'reason': 'Same farewell event already represented'}])
+    monkeypatch.setattr(sports, 'codex_review', review)
+    prompt = tmp_path / 'events.md'
+    prompt.write_text('One account per sports event')
+    result = sports.reconcile_sports_events(request, [first, second], prompt, tmp_path)
+    assert result['selected_ids'] == ['a']
+    assert result['excluded'][0]['id'] == 'b'
+    assert sports.reconcile_sports_events(request, [first, second], prompt, tmp_path) == result
+    assert len(calls) == 1
+    assert calls[0]['shortlist'][0]['sportsGroup'] == 'Soccer'

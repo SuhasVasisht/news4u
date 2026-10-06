@@ -262,3 +262,9 @@ Removing stories can reuse unchanged factual checks, but coverage is independent
 reconciled; adding stories cannot reuse the old selection's approval. Export
 checks source consistency for selected stories and refuses to silently drop or
 substitute a missing selected source. Changed excluded candidates do not block it.
+
+Sports admissions receive one cached final event-selection review across all
+batches. It selects IDs only, removes alternate accounts of the same event, and
+keeps genuinely distinct developments involving the same player or club. League
+limits are enforced afterwards. This avoids relying solely on similar headlines;
+the existing evidence and source/date validations still apply to published prose.
