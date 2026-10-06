@@ -158,8 +158,9 @@ collectors:
     category: finance
     edition_sector: Deals & regulation
     editorial_type: announcement
-    url: https://www.ptc.com/en/news/2026/schneider-electric-to-acquire-ptc
+    url: https://www.sec.gov/Archives/edgar/data/857005/000119312526413124/d174191dex991.htm
     single_article: true
+    article_title: Schneider Electric to acquire PTC in $22.6 billion deal
     limit: 1
     editorial_limit: 1
   - name: guardian

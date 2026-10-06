@@ -23,7 +23,8 @@ class NewsroomCollector(BaseCollector):
         if self.context.config.get("single_article"):
             heading = page.css_first("h1")
             main = page.css_first("main") or page.css_first("article") or page.body
-            if not heading or not main:
+            title = heading.text() if heading else self.context.config.get("article_title")
+            if not title or not main:
                 return []
             canonical = page.css_first('link[rel="canonical"]')
             url = canonical.attributes.get("href") if canonical else base
@@ -44,7 +45,7 @@ class NewsroomCollector(BaseCollector):
                 return []
             body = extract_text_from_html(response.text, url) or main.text(separator="\n")
             return [RawItem(source=self.name, source_type="scrape", category=self.category,
-                title=heading.text(), url=url, published_at=published, text=body, summary=body[:800],
+                title=title, url=url, published_at=published, text=body, summary=body[:800],
                 image_url=extract_image_from_page_html(response.text, url),
                 raw={"_editorial_type": self.context.config.get("editorial_type", "announcement"),
                      "_edition_sector": self.context.config.get("edition_sector")})]
