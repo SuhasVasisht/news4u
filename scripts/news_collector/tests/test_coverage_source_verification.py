@@ -79,3 +79,13 @@ def test_automatic_discovery_enforces_verification_before_replacing_a_checklist(
     payload['events'][0]['mustCover'] = False  # A researcher can correct an unverified requirement.
     result = discovery.discover_coverage(original, NOW, {})
     assert result['events'][0]['mustCover'] is False
+
+
+def test_two_domains_owned_by_one_publisher_are_not_independent_corrobation(monkeypatch):
+    monkeypatch.setattr(images, 'download', lambda _, url, __: (
+        b'<meta property="article:published_time" content="2026-10-07T12:00:00Z">', url))
+    monkeypatch.setattr(extract, 'extract_text_from_html', lambda *_: 'verified article ' * 100)
+    payload = event('https://bbc.co.uk/news/article')
+    payload['events'][0]['sources'].append({**payload['events'][0]['sources'][0], 'url': 'https://bbc.com/news/second'})
+    with pytest.raises(ValueError, match='lacks accessible publisher-dated evidence'):
+        discovery.verify_must_cover_sources(payload, NOW)
