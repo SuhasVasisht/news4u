@@ -11,6 +11,7 @@ from lib.publisher_logging import open_log, record
 root = Path(__file__).resolve().parent.parent
 log, redact = open_log(root)
 lock_path = root / "data/publisher.lock"
+lock_path.parent.mkdir(parents=True, exist_ok=True)
 with log, lock_path.open("a+") as lock:
     record(log, redact, f"run_start pid={os.getpid()} command={' '.join(sys.argv[1:])}")
     try:
