@@ -35,7 +35,12 @@ def test_wrapper_records_child_progress_errors_and_exit(tmp_path, monkeypatch):
     import subprocess
     monkeypatch.setenv('NEWS_PUBLISHER_LOG_DIR', str(tmp_path))
     monkeypatch.setenv('TEST_SECRET_TOKEN', 'sensitive-log-secret')
-    wrapper = MODULE.parents[1] / 'with-publisher-lock.py'
+    import shutil
+    checkout = tmp_path / 'checkout'
+    (checkout / 'scripts/lib').mkdir(parents=True)
+    shutil.copyfile(MODULE, checkout / 'scripts/lib/publisher_logging.py')
+    wrapper = checkout / 'scripts/with-publisher-lock.py'
+    shutil.copyfile(MODULE.parents[1] / 'with-publisher-lock.py', wrapper)
     result = subprocess.run([sys.executable, str(wrapper), sys.executable, '-c',
         'import os,sys; print("progress " + os.environ["TEST_SECRET_TOKEN"]); print("failure",file=sys.stderr); sys.exit(7)'],
         capture_output=True, text=True)
