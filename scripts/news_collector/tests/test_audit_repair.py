@@ -68,7 +68,7 @@ def test_unchanged_passed_check_can_be_reused():
     assert repairable_ids(report) == []
 
 
-@pytest.mark.parametrize("key", ["policy", "cutoff", "packets", "selection", "history", "checklist", "decisions"])
+@pytest.mark.parametrize("key", ["policy", "cutoff", "packets", "selection", "history", "decisions"])
 def test_changed_review_inputs_prevent_reuse(key):
     request, envelope = fixture()
     report = validate_audit(envelope, request, NOW)
@@ -114,3 +114,11 @@ def test_removal_only_selection_reuses_unchanged_checks_but_added_stories_do_not
     changed = deepcopy(request)
     changed['packets'][0]['chunks'][0]['text'] = 'Changed evidence'
     assert reusable_story_checks(before, changed, report) == []
+
+
+def test_new_discovery_requires_fresh_coverage_but_can_reuse_identical_factual_checks():
+    request, envelope = fixture()
+    report = validate_audit(envelope, request, NOW)
+    changed = deepcopy(request)
+    changed["checklist"]["events"][0]["event"] = "New independently researched coverage context"
+    assert [story.id for story in reusable_story_checks(request, changed, report)] == ["a"]

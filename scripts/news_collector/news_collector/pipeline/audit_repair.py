@@ -77,9 +77,10 @@ def prunable_optional_ids(report, checklist):
 
 
 def reusable_story_checks(previous_request, request, report):
-    # Only removal is safe across selection changes: it cannot add claims or
+    # Discovery changes require fresh coverage reconciliation, not new checks of
+    # identical published claims. Only removal is safe across selection changes: it cannot add claims or
     # duplicate events. Coverage is reconciled again against the reduced edition.
-    for key in ("policy", "cutoff", "history", "checklist"):
+    for key in ("policy", "cutoff", "history"):
         if previous_request.get(key) != request.get(key):
             return []
     if not isinstance(request.get("selection"), dict) or not isinstance(request.get("packets"), list):

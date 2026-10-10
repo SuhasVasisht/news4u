@@ -1,6 +1,9 @@
 import argparse
 import json
 import os
+from pathlib import Path
+from typing import Literal
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime, timezone
 from rapidfuzz import fuzz
 
@@ -74,7 +77,91 @@ def select_sports(decisions, packets, *, deduplicate=True):
 
 
 
-def reconcile_sports_events(request, decisions, prompt, output):
+
+class SportsNoveltyItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    status: Literal["new", "repeat", "material_update"]
+    prior_story_ids: list[str]
+    material_update: str | None
+    evidence: list[str]
+    reason: str
+
+
+class SportsNoveltyReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    stories: list[SportsNoveltyItem]
+
+
+def sports_history_details(history, root=None):
+    details = {}
+    if root:
+        for path in sorted((root / "data/cloudflare-published/editions").glob("*/edition.json")):
+            edition = json.loads(path.read_text())
+            for story in edition.get("stories", []):
+                details.setdefault((edition["date"], story["id"]), story)
+    result = {}
+    for previous in history:
+        story = details.get((previous["date"], previous["id"]), {})
+        if story and story.get("sector") != "Sports":
+            continue
+        result[previous["id"]] = {**previous, **{key: story[key] for key in
+            ("summary", "points", "publishedAt") if key in story}}
+    return list(result.values())
+
+
+def review_sports_novelty(request, decisions, output, root=None):
+    history = sports_history_details(request["previouslyPublished"], root)
+    if not history or not decisions:
+        return [], []
+    ids = {decision.id for decision in decisions}
+    packets = [packet for packet in request["packets"] if packet["id"] in ids]
+    payload = {"packets": packets, "proposedStories": [d.model_dump(mode="json") for d in decisions],
+               "previouslyPublished": history}
+    prompt = Path(__file__).resolve().parents[2] / "config/sports-novelty-prompt.md"
+    key = fingerprint({"input": payload, "prompt": prompt.read_text(), "profile": reader_profile(),
+                       "model": os.environ.get("NEWS_EDITOR_MODEL", "default"),
+                       "effort": os.environ.get("NEWS_EDITOR_REASONING_EFFORT", "default")})
+    cache = output / f"novelty-{key}.json"
+    def validate(result):
+        actual = [item.id for item in result.stories]
+        if len(actual) != len(ids) or set(actual) != ids:
+            raise ValueError("Sports novelty review must account for every proposed story exactly once")
+        prior_ids = {item["id"] for item in history}
+        refs = {p["id"]: {c["id"] for c in p["chunks"]} for p in packets}
+        for item in result.stories:
+            if not set(item.prior_story_ids) <= prior_ids or not set(item.evidence) <= refs[item.id]:
+                raise ValueError("Sports novelty proof references unknown history or source evidence")
+            if len(item.reason.strip()) < 10:
+                raise ValueError("Sports novelty review requires a specific explanation")
+            if item.status == "new" and (item.prior_story_ids or item.material_update or not item.evidence):
+                raise ValueError("New sports event needs source evidence and no prior-event match")
+            if item.status == "repeat" and (not item.prior_story_ids or item.material_update):
+                raise ValueError("Repeated sports event needs a known prior story and cannot claim an update")
+            if item.status == "material_update" and (not item.prior_story_ids or not item.evidence
+                    or not item.material_update or len(item.material_update.strip()) < 20):
+                raise ValueError("Sports update needs prior IDs, a concrete new development and cited source chunks")
+    print(f"Sports cross-edition novelty audit: {len(decisions)} selected stories", flush=True)
+    result = None
+    if cache.exists():
+        try:
+            result = SportsNoveltyReview.model_validate_json(cache.read_text())
+            validate(result)
+        except ValueError:
+            result = None
+    if result is None:
+        result = codex_review(payload, prompt, output, SportsNoveltyReview, validate_result=validate)
+        validate(result)
+    write_json(cache, result.model_dump(mode="json"))
+    write_json(output / "novelty-latest.json", {"inputHash": key, "requestHash": request.get("requestHash"),
+        "review": result.model_dump(mode="json")})
+    carryover = {packet["id"] for packet in packets if packet.get("carryoverFrom")}
+    repeats = [{"id": item.id, "reason": item.reason} for item in result.stories
+               if item.status == "repeat" and item.id not in carryover]
+    updates = [item.model_dump(mode="json") for item in result.stories if item.status == "material_update"]
+    return repeats, updates
+
+def reconcile_sports_events(request, decisions, prompt, output, history_root=None):
     packets = {packet["id"]: packet for packet in request["packets"]}
     shortlist = [{**decision.model_dump(mode="json"), "sportsGroup": packets[decision.id]["sportsGroup"],
                   "url": packets[decision.id]["url"], "publishedAt": packets[decision.id]["publishedAt"]}
@@ -102,6 +189,11 @@ def reconcile_sports_events(request, decisions, prompt, output):
     chosen = set(result.selected_ids)
     selection = select_sports([decision for decision in decisions if decision.id in chosen], packets, deduplicate=False)
     selection["excluded"].extend(item.model_dump(mode="json") for item in result.excluded)
+    repeats, _ = review_sports_novelty(request,
+        [decision for decision in decisions if decision.id in selection["selected_ids"]], output, history_root)
+    repeated = {item["id"] for item in repeats}
+    selection["selected_ids"] = [key for key in selection["selected_ids"] if key not in repeated]
+    selection["excluded"].extend(repeats)
     return selection
 
 def main():
@@ -137,7 +229,7 @@ def main():
         result = review_candidates(request, settings.project_root / "config/sports-prompt.md", output)
         review = {"requestHash": request["requestHash"], "reviewer": "Sports editorial desk", "reviewedAt": datetime.now(timezone.utc).isoformat(),
                   "decisions": [d.model_dump() for d in result.decisions], "selection": reconcile_sports_events(request, result.decisions,
-                     settings.project_root / "config/sports-event-selection-prompt.md", output)}
+                     settings.project_root / "config/sports-event-selection-prompt.md", output, settings.project_root.parent.parent)}
     write_json(output / "review-response.json", review)
     snapshot = publish_sports(request, review, settings, repository, datetime.now(timezone.utc), zone)
     write_json(output / "latest.json", snapshot)

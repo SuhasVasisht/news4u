@@ -315,3 +315,16 @@ Unavailable reports plus background topic pages are returned to the researcher
 for its bounded correction, rather than accepted on the strength of generated
 URLs/dates. This does not waive a verified mandatory event: genuine omissions
 and failed verification still block publication and appear in the run log.
+
+Sports selection has a separate cross-edition novelty audit against published
+summaries/points and complete current source chunks. New URLs, publication dates
+and retrospective commentary do not make the same contract, match or injury new.
+Repeated events are excluded; material updates need known prior IDs, a specific
+new development and bound source citations. Proofs are cached with the full
+inputs/prompt/model and saved in private `data/sports/novelty-latest.json`.
+Explicit authorized carryover remains subject to the existing date/label checks.
+
+Changing independent discovery requires a new coverage reconciliation, while
+unchanged approved factual checks can be reused with identical policy, cutoff,
+history, packets and prose and no added selected stories. The new complete audit
+still validates every story, coverage requirement and duplicate event.
