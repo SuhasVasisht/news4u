@@ -100,7 +100,9 @@ def discover_coverage(output, cutoff, profile, checklist_file=None):
     if checklist_file is None and output.exists() and context_path.exists():
         try:
             if json.loads(context_path.read_text()) == context:
-                return validate_checklist(json.loads(output.read_text()), cutoff, profile)
+                cached = validate_checklist(json.loads(output.read_text()), cutoff, profile)
+                print(f"Coverage discovery: reusing {len(cached['events'])} current validated events", flush=True)
+                return cached
         except (ValueError, TypeError):
             pass  # A new day or expired research requires fresh discovery.
     if checklist_file is not None:
@@ -113,11 +115,14 @@ def discover_coverage(output, cutoff, profile, checklist_file=None):
         def validate_research(result):
             candidate = validate_checklist(result.model_dump(mode="json"), cutoff, profile)
             verify_must_cover_sources(candidate, cutoff, checked_sources)
+        print(f"Coverage discovery: starting independent research for cutoff {cutoff.isoformat()}", flush=True)
         result = codex_review(research, prompt_path, output.parent, IndependentChecklist,
             allow_web=True, validate_result=validate_research)
         payload = result.model_dump(mode="json")
         validate_research(result)
     validated = validate_checklist(payload, cutoff, profile)
+    print(f"Coverage discovery complete: {len(validated['events'])} events, "
+          f"{sum(event['mustCover'] for event in validated['events'])} mandatory", flush=True)
     output.parent.mkdir(parents=True, exist_ok=True)
     # A failed write or validation must never replace the previous reviewed checklist.
     with tempfile.NamedTemporaryFile(mode="w", dir=output.parent, delete=False, suffix=".tmp") as handle:

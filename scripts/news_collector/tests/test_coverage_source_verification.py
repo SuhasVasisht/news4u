@@ -50,3 +50,32 @@ def test_corrobation_requires_independent_domains_and_one_fresh_article(monkeypa
         discovery.verify_must_cover_sources(payload, NOW)
     payload['events'][0]['sources'][1]['url'] = 'https://independent.org/article'
     discovery.verify_must_cover_sources(payload, NOW)
+
+
+def test_automatic_discovery_enforces_verification_before_replacing_a_checklist(tmp_path, monkeypatch):
+    from news_collector.pipeline import editorial
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW
+    monkeypatch.setattr(discovery, 'datetime', Clock)
+    payload = {'checkedAt': NOW.isoformat(), 'method': 'independent_web_research', 'researcher': 'Independent desk',
+               'scope': ['Health'], 'queries': ['October 7 outbreak update'],
+               'events': [{**event()['events'][0], 'event': 'Important new outbreak development', 'sector': 'Science & health'}]}
+    payload['events'][0]['sources'][0]['finding'] = 'Primary report describes the new outbreak development.'
+    original = tmp_path / 'checklist.json'
+    original.write_text('{"prior": true}')
+    def unavailable(*_):
+        raise ValueError('unavailable publisher article')
+    monkeypatch.setattr(images, 'download', unavailable)
+    def research(*args, **kwargs):
+        result = discovery.IndependentChecklist.model_validate(payload)
+        kwargs['validate_result'](result)
+        return result
+    monkeypatch.setattr(editorial, 'codex_review', research)
+    with pytest.raises(ValueError, match='lacks accessible publisher-dated evidence'):
+        discovery.discover_coverage(original, NOW, {})
+    assert original.read_text() == '{"prior": true}'
+    payload['events'][0]['mustCover'] = False  # A researcher can correct an unverified requirement.
+    result = discovery.discover_coverage(original, NOW, {})
+    assert result['events'][0]['mustCover'] is False
