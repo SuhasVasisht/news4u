@@ -305,3 +305,11 @@ new independent audit runs against today's evidence. Cached approvals cannot
 weaken freshness or quality checks, and a current mandatory coverage failure
 still blocks publication. Regression tests preserve previous-day audit files
 and verify that a fresh day can pass independently.
+
+Automatic discovery verifies blocking coverage sources by fetching public direct
+articles with bounded requests and checking substantive text and publisher dates.
+Requirements need a fresh primary document or independent dated corroboration.
+Unavailable reports plus background topic pages are returned to the researcher
+for its bounded correction, rather than accepted on the strength of generated
+URLs/dates. This does not waive a verified mandatory event: genuine omissions
+and failed verification still block publication and appear in the run log.

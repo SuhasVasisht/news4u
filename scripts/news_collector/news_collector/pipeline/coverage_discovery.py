@@ -7,6 +7,9 @@ import os
 from pathlib import Path
 import tempfile
 from zoneinfo import ZoneInfo
+from urllib.parse import urlparse
+
+import httpx
 
 from .edition_audit import IndependentChecklist
 
@@ -45,11 +48,52 @@ def validate_checklist(payload, cutoff, profile, now=None):
     return checklist.model_dump(mode="json")
 
 
+
+def verify_must_cover_sources(payload, cutoff, cache=None):
+    """Research cannot impose blocking requirements using guessed dates or URLs."""
+    from .images import download
+    from .publication_dates import article_publication_date
+    from .extract import extract_text_from_html
+    cache = cache if cache is not None else {}
+    events = [event for event in payload["events"] if event["mustCover"]]
+    if not events:
+        return
+    if sum(len(event["sources"]) for event in events) > 30:
+        raise ValueError("Must-cover source verification is limited to 30 direct sources")
+    with httpx.Client(timeout=10, follow_redirects=False, headers={"User-Agent": "News4u coverage verifier"}) as client:
+        for event in events:
+            verified = []
+            for source in event["sources"]:
+                url = source["url"]
+                if url not in cache:
+                    try:
+                        body, final_url = download(client, url, 2_000_000)
+                        html = body.decode("utf-8", errors="replace")
+                        date = article_publication_date(html)
+                        text = extract_text_from_html(html, final_url) or ""
+                        cache[url] = (date, len(text.split()), final_url)
+                    except (httpx.HTTPError, ValueError, OSError) as exc:
+                        cache[url] = (None, 0, url)
+                        print(f"Coverage source unavailable: {url} ({type(exc).__name__})", flush=True)
+                actual, words, final_url = cache[url]
+                claimed = datetime.fromisoformat(source["publishedAt"])
+                if (actual is not None and actual.tzinfo is not None and words >= 80
+                        and claimed.date() in {actual.date(), actual.astimezone(timezone.utc).date()} and actual <= cutoff + timedelta(minutes=5)):
+                    verified.append((actual, (urlparse(final_url).hostname or "").removeprefix("www.")))
+            fresh = [(date, host) for date, host in verified if date >= cutoff - timedelta(hours=48)]
+            primary = any(host.endswith((".gov", ".gov.uk", ".europa.eu", ".int"))
+                          or host in {"ecb.europa.eu", "who.int"} for _, host in fresh)
+            if not fresh or not (primary or len({host for _, host in verified}) >= 2):
+                raise ValueError(f"Must-cover event {event['id']} lacks accessible publisher-dated evidence of a new development. "
+                                 "Find direct dated primary evidence or independent corroboration; "
+                                 "background topic pages and unavailable articles cannot establish a blocking requirement.")
+            print(f"Coverage requirement verified: {event['id']} ({len(verified)} dated sources)", flush=True)
+
 def discover_coverage(output, cutoff, profile, checklist_file=None):
     """Return and persist a validated checklist; errors leave the prior file untouched."""
     output = Path(output)
     prompt_path = Path(__file__).resolve().parents[2] / "config" / "coverage-discovery-prompt.md"
-    context = {"profile": profile, "prompt": prompt_path.read_text(),
+    context = {"sourceVerificationVersion": 1, "profile": profile, "prompt": prompt_path.read_text(),
                "model": os.environ.get("NEWS_EDITOR_MODEL", "default"),
                "effort": os.environ.get("NEWS_EDITOR_REASONING_EFFORT", "default")}
     context_path = output.with_suffix(".context.json")
@@ -65,9 +109,14 @@ def discover_coverage(output, cutoff, profile, checklist_file=None):
         from .editorial import codex_review
         research = {"cutoff": cutoff.isoformat(), "profile": profile,
                     "windowStart": (cutoff - timedelta(hours=48)).isoformat()}
+        checked_sources = {}
+        def validate_research(result):
+            candidate = validate_checklist(result.model_dump(mode="json"), cutoff, profile)
+            verify_must_cover_sources(candidate, cutoff, checked_sources)
         result = codex_review(research, prompt_path, output.parent, IndependentChecklist,
-            allow_web=True, validate_result=lambda result: validate_checklist(result.model_dump(mode="json"), cutoff, profile))
+            allow_web=True, validate_result=validate_research)
         payload = result.model_dump(mode="json")
+        validate_research(result)
     validated = validate_checklist(payload, cutoff, profile)
     output.parent.mkdir(parents=True, exist_ok=True)
     # A failed write or validation must never replace the previous reviewed checklist.

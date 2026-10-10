@@ -38,3 +38,11 @@ Older background sources may corroborate it, but an old event, a refreshed topic
 landing page, or a new search result is not a new development. Do not impose
 catch-up requirements for weeks-old outbreaks, reports, orders or conflicts.
 Use the requested window in search queries and verify dates on direct articles.
+
+Before a must-cover event is accepted, the application opens its direct source
+URLs and checks publisher publication metadata and substantive article text.
+Supply accessible dated articles, not refreshed topic or emergency landing pages.
+A blocked report plus an older background page cannot establish a new mandatory
+development. If verification feedback rejects a requirement, find verifiable
+primary evidence or independent dated corroboration; use optional coverage when
+you cannot establish that this is a verified new development. Do not invent dates.

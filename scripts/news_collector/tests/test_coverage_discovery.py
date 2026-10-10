@@ -18,6 +18,7 @@ def freeze_clock(monkeypatch):
         def now(cls, tz=None):
             return NOW.astimezone(tz) if tz else NOW.replace(tzinfo=None)
     monkeypatch.setattr(discovery, "datetime", Clock)
+    monkeypatch.setattr(discovery, "verify_must_cover_sources", lambda *_: None)
 
 
 def checklist():
