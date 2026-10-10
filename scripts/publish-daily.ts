@@ -64,6 +64,7 @@ async function main() {
     console.log(`Daily publisher: ${date} (${profile.timezone})`);
     const restored = await restorePublication(root, `https://${config.domain}`);
     if (restored.manifest.date > date) throw new Error("Production is ahead of this machine's date; check its clock.");
+    console.log(JSON.stringify({ event: "history_restored", liveDate: restored.manifest.date, fingerprint: restored.fingerprint }));
     const prior = await readJson<RunState>(file);
     if (reviseToday && restored.manifest.date !== date) throw new Error("--revise-today requires today's edition to be already published");
     if (restored.manifest.date === date && !reviseToday) {
@@ -86,6 +87,7 @@ async function main() {
     const state: RunState = canResume ? prior! : {
       date, revision, history: restored.fingerprint, startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), completed: [], status: "running",
     };
+    console.log(JSON.stringify({ event: "checkpoint", date, revision, resumed: Boolean(canResume), completed: state.completed }));
     if ((!state.completed.includes("editorial") || !state.completed.includes("sports")) && await quotaBlock()) {
       throw new Error("Publisher blocked: editor account usage exhausted. Fund the account, then retry with --retry-editor.");
     }
@@ -112,6 +114,7 @@ async function main() {
         const collection = JSON.parse(output);
         if (!collection.sources?.some((source: { status: string; collected: number }) => ["ok", "partial"].includes(source.status) && source.collected > 0)) throw new Error("Collection produced no usable sources");
         await atomicJson(path.join(root, "data/collection-run.json"), collection);
+        for (const source of collection.sources || []) console.log(JSON.stringify({ event: "source_collection", ...source }));
         console.log(`Collection complete; ${collection.errors?.length || 0} source errors recorded in collection-run.json`);
       } else if (["editorial", "sports", "export"].includes(stage)) {
         execFileSync(python, ["-m", `news_collector.jobs.${stage === "export" ? "export_edition" : stage}`], {

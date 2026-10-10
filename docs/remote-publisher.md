@@ -276,3 +276,32 @@ checkpoints; the archive retains the original edition as a revision. Ordinary
 timer runs remain same-day no-ops. ESPN scoreboards are requested one calendar
 day at a time and merged by provider event ID because date-range requests can
 return HTTP 400. A versioned sports request invalidates older cached formats.
+
+## Per-run diagnostics and 30-day log retention
+
+Every supported npm publisher/build/deploy command writes timestamped stdout and
+stderr to private `data/publisher-logs/publisher-YYYY-MM-DD.log` (Pacific dates,
+mode 0600). `NEWS_PUBLISHER_LOG_DIR` can select a private directory outside the
+checkout. Logs contain run start/end and exit status, checkpoint reuse, each
+source's collection status, editorial batch progress, and JSON stage start,
+completion, failure and elapsed milliseconds. Configured secrets are redacted.
+On every invocation, only matching publisher log files older than 30 days by
+modification time are removed. These logs and all runtime data remain ignored by Git.
+
+For the native VM, inspect both the file and the service journal:
+
+```sh
+tail -n 200 ~/news-publisher/data/publisher-logs/publisher-$(TZ=America/Los_Angeles date +%F).log
+journalctl --user -u news-publisher-user.service --since '3 days ago' --no-pager
+systemctl --user list-timers news-publisher-user.timer --all
+cat ~/news-publisher/data/publisher-status.json
+```
+
+The journal also contains systemd preflight failures (including Git fetch) before
+the publisher starts. Application log retention requires no root privileges.
+
+Expired or invalid prior audit caches are ignored as reuse candidates, then a
+new independent audit runs against today's evidence. Cached approvals cannot
+weaken freshness or quality checks, and a current mandatory coverage failure
+still blocks publication. Regression tests preserve previous-day audit files
+and verify that a fresh day can pass independently.

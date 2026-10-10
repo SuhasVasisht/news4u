@@ -29,8 +29,16 @@ export async function runStages(state: RunState, run: (stage: Stage) => Promise<
     state.status = "running";
     state.updatedAt = new Date().toISOString();
     await save(state);
+    const started = Date.now();
+    console.log(JSON.stringify({ event: "stage_start", stage, date: state.date, at: new Date().toISOString() }));
     try { await run(stage); }
-    catch (error) { state.status = "failed"; await save(state); throw error; }
+    catch (error) {
+      console.error(JSON.stringify({ event: "stage_failed", stage, date: state.date, elapsedMs: Date.now() - started,
+        error: error instanceof Error ? error.message : String(error), at: new Date().toISOString() }));
+      state.status = "failed"; await save(state); throw error;
+    }
+    console.log(JSON.stringify({ event: "stage_complete", stage, date: state.date, elapsedMs: Date.now() - started,
+      at: new Date().toISOString(), ...(stage === "deploy" && options.noUpload ? { noUpload: true } : {}) }));
     if (stage === "deploy" && options.noUpload) {
       state.status = "validated";
       delete state.active;

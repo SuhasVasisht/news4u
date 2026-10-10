@@ -1,5 +1,5 @@
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 
 import pytest
@@ -264,3 +264,38 @@ def test_incomplete_claim_audit_is_prunable_even_when_verdict_says_pass():
     assert prunable_optional_ids(report, request["checklist"]) == ["a"]
     request["checklist"]["events"][0]["mustCover"] = True
     assert prunable_optional_ids(report, request["checklist"]) == []
+
+
+@pytest.mark.parametrize("damage", ["previous_day", "expired_same_day", "invalid_evidence"])
+def test_previous_audit_cache_cannot_block_a_fresh_day(tmp_path, monkeypatch, damage):
+    review = reviewed_fixture()
+    final = review.pop("finalAudit")
+    request = audit_request(review, [], final["checklist"])
+    stale_review = deepcopy(review)
+    if damage != "invalid_evidence":
+        stale_review["cutoff"] = (NOW - timedelta(hours=24 if damage == "previous_day" else 7)).isoformat()
+    stale_request = audit_request(stale_review, [], final["checklist"])
+    stale_response = deepcopy(final["envelope"])
+    stale_response["requestHash"] = stale_request["requestHash"]
+    if damage == "invalid_evidence":
+        stale_response["review"]["stories"][0]["claims"][0]["evidence"] = ["unknown"]
+    output = tmp_path / "data/editorial"
+    output.mkdir(parents=True)
+    (output / "quality-review-request.json").write_text(json.dumps(stale_request))
+    (output / "quality-review-response.json").write_text(json.dumps(stale_response))
+    clock = type("Clock", (datetime,), {"now": classmethod(lambda cls, tz=None: NOW)})
+    monkeypatch.setattr(quality_review, "datetime", clock)
+    monkeypatch.setattr("news_collector.pipeline.edition_audit.datetime", clock)
+    monkeypatch.setattr(quality_review, "load_history", lambda *_: [])
+    monkeypatch.setattr(quality_review, "discover_coverage", lambda *_: final["checklist"])
+    monkeypatch.setattr(quality_review, "reconsider_announcements", lambda *_args, **_kwargs: None)
+    calls = []
+    def fresh_audit(current, prompt, output, reused):
+        assert current["requestHash"] == request["requestHash"]
+        assert reused == []
+        calls.append(current)
+        return AuditReview.model_validate(final["envelope"]["review"])
+    monkeypatch.setattr(quality_review, "run_batched_audit", fresh_audit)
+    assert quality_review.run_quality_review(tmp_path, review).status == "passed"
+    assert len(calls) == 1
+    assert verify_final_audit(review, [], NOW).status == "passed"

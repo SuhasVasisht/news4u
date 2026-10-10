@@ -266,16 +266,22 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
         # Only reuse a response that is bound to both the saved and current request.
         saved_hash = previous_request.get("requestHash")
         if previous_response.get("requestHash") == saved_hash:
-            previous_report = validate_audit(previous_response, previous_request)
-            atomic_json(output / f"audit-record-{previous_report.requestHash}.json",
-                        {"request": previous_request, "response": previous_response})
-            pruned_report = (prune_optional_audit_failures(
-                root, review, history, checklist, request, previous_report, output, date)
-                if saved_hash == request["requestHash"] else None)
-            if pruned_report and pruned_report.status == "passed":
-                return pruned_report
-            request = audit_request(review, history, checklist)
-            reused = reusable_story_checks(previous_request, request, previous_report)
+            try:
+                previous_report = validate_audit(previous_response, previous_request)
+            except (ValueError, KeyError, TypeError) as exc:
+                # A cache is an optimization, never a prerequisite for a new day.
+                # Keep freshness/integrity gates for the new audit unchanged.
+                print(f"Ignoring unusable previous audit cache: {str(exc)[:250]}", flush=True)
+            else:
+                atomic_json(output / f"audit-record-{previous_report.requestHash}.json",
+                            {"request": previous_request, "response": previous_response})
+                pruned_report = (prune_optional_audit_failures(
+                    root, review, history, checklist, request, previous_report, output, date)
+                    if saved_hash == request["requestHash"] else None)
+                if pruned_report and pruned_report.status == "passed":
+                    return pruned_report
+                request = audit_request(review, history, checklist)
+                reused = reusable_story_checks(previous_request, request, previous_report)
     if not audit_file:
         review.pop("finalAudit", None)
         atomic_json(output / "latest.json", review)
