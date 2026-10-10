@@ -73,3 +73,6 @@ logs/scheduler/*
 !logs/scheduler/.gitkeep
 data/*
 !data/.gitkeep
+
+# private publisher logs, including custom in-repo log directories
+publisher-????-??-??.log
