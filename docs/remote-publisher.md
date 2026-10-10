@@ -297,8 +297,10 @@ systemctl --user list-timers news-publisher-user.timer --all
 cat ~/news-publisher/data/publisher-status.json
 ```
 
-The journal also contains systemd preflight failures (including Git fetch) before
-the publisher starts. Application log retention requires no root privileges.
+The native unit also sends its Git preflight commands through the private log
+wrapper, so failed pulls appear there as well as in the journal. Collector
+start/completion events stream to the log immediately, while the collection JSON
+remains machine-readable. Application log retention requires no root privileges.
 
 Expired or invalid prior audit caches are ignored as reuse candidates, then a
 new independent audit runs against today's evidence. Cached approvals cannot

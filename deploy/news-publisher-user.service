@@ -10,9 +10,9 @@ Environment=PATH=%h/.npm-global/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=TZ=America/Los_Angeles
 Environment=APP_TIMEZONE=America/Los_Angeles
 EnvironmentFile=%h/news-publisher/.env
-ExecStartPre=/usr/bin/git diff --quiet
-ExecStartPre=/usr/bin/git diff --cached --quiet
-ExecStartPre=/usr/bin/git pull --ff-only origin main
+ExecStartPre=/usr/bin/python3 %h/news-publisher/scripts/with-publisher-lock.py /usr/bin/git diff --quiet
+ExecStartPre=/usr/bin/python3 %h/news-publisher/scripts/with-publisher-lock.py /usr/bin/git diff --cached --quiet
+ExecStartPre=/usr/bin/python3 %h/news-publisher/scripts/with-publisher-lock.py /usr/bin/git pull --ff-only origin main
 ExecStart=/usr/bin/npm run publish:daily
 TimeoutStartSec=4h
 TimeoutStopSec=60s

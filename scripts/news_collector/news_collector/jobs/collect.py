@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+import time
 from datetime import datetime, timezone
 
 from news_collector.models import StoryCluster
@@ -23,6 +25,9 @@ def main() -> None:
     errors: list[str] = []
     source_results: list[dict] = []
     for collector in collectors:
+        started = time.monotonic()
+        print(json.dumps({"event": "collector_start", "source": collector.name,
+                          "at": datetime.now(timezone.utc).isoformat()}), file=sys.stderr, flush=True)
         result = collector.run(force=force_run, check_now=os.environ.get("NEWS_COLLECTOR_CHECK_NOW") == "1")
         raw_items = result.items
         image_quality = prepare_images(raw_items, repository, settings.user_agent)
@@ -76,6 +81,10 @@ def main() -> None:
                 "images": image_quality,
             }
         )
+        print(json.dumps({"event": "collector_complete", "source": collector.name, "status": result.status,
+                          "collected": len(raw_items), "inserted": inserted_count, "deduped": deduped_count,
+                          "elapsedSeconds": round(time.monotonic() - started, 3),
+                          "at": datetime.now(timezone.utc).isoformat()}), file=sys.stderr, flush=True)
         if result.status == "error":
             errors.append(f"{collector.name}: {result.reason}")
 
