@@ -8,11 +8,16 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
 
-def prepare_editorial(repository, settings, config, args):
+def prepare_editorial(repository, settings, config, args, required_urls=()):
     from news_collector.pipeline.quality_review import atomic_json
     output = settings.project_root.parent.parent / "data/editorial"
     marker = output / "publisher-draft.json"
     key = os.environ.get("NEWS_EDITORIAL_RUN_KEY")
+    from news_collector.utils import canonicalize_url
+    def accounts_for_sources(review):
+        represented = {canonicalize_url(p["url"]) for p in review.get("packets", [])}
+        represented.update(canonicalize_url(p["url"]) for p in review.get("excluded", []))
+        return set(required_urls) <= represented
     can_resume = key and not args.prepare_review and not args.review_file
     if can_resume and marker.exists():
         saved = json.loads(marker.read_text())
@@ -22,9 +27,11 @@ def prepare_editorial(repository, settings, config, args):
             if latest.exists():
                 progress = json.loads(latest.read_text())
                 if (progress.get("generatedAt") and progress.get("generatedAt") == saved["review"].get("generatedAt")
-                        and progress.get("historyHash") == saved["review"].get("historyHash")):
+                        and progress.get("historyHash") == saved["review"].get("historyHash")
+                        and accounts_for_sources(progress)):
                     return progress
-            return saved["review"]
+            if accounts_for_sources(saved["review"]):
+                return saved["review"]
     latest = output / "latest.json"
     if can_resume and latest.exists():
         # Preserve source-bound desk work across stage fixes. A draft without
@@ -50,7 +57,7 @@ def prepare_editorial(repository, settings, config, args):
                 # of the same URL must not overwrite its current input hash.
                 current.setdefault((row["source"], row["canonical_url"]), source_hash(row))
             selected = set(approved["selection"]["selected_ids"])
-            if (approved["policy"] == policy
+            if (accounts_for_sources(approved) and approved["policy"] == policy
                     and approved["historyHash"] == history_hash(history)
                     and cutoff.astimezone(ZoneInfo(profile["timezone"])).date().isoformat() == date
                     and timedelta(0) <= now - cutoff < timedelta(hours=6)
@@ -79,7 +86,16 @@ def main():
     parser.add_argument("--checklist-file")
     args = parser.parse_args()
     settings, config, repository, _ = build_runtime()
-    result = prepare_editorial(repository, settings, config, args)
+    required_urls = set()
+    if not args.review_file and any(c["name"] == "coverage_research" and c.get("enabled", True) for c in config["collectors"]):
+        from news_collector.pipeline.coverage_discovery import discover_coverage
+        from news_collector.pipeline.coverage_intake import collect_required_sources
+        from news_collector.pipeline.editorial import reader_profile
+        cutoff = datetime.now(timezone.utc)
+        output = settings.project_root.parent.parent / "data/editorial"
+        checklist = discover_coverage(output / "checklist.json", cutoff, reader_profile(), args.checklist_file)
+        required_urls = collect_required_sources(checklist, cutoff, repository, settings.user_agent)
+    result = prepare_editorial(repository, settings, config, args, required_urls)
     if args.prepare_review:
         print({"request": result["request"], "pending": result["pending"], "cached": len(result["decisions"])})
         return

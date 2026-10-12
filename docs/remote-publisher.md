@@ -379,3 +379,15 @@ source hashes, history and date are revalidated. An unapproved draft still requi
 a fresh independent audit; resuming expensive desk work never grants permission to
 publish. This allows recovery after coverage transport/context failures without
 throwing away valid factual batches or manually editing checkpoints.
+
+Independent coverage research now runs before the ordinary editorial desk. For
+mandatory events absent from the feeds, `coverage_research` fetches at most 30
+direct source URLs using the same guarded downloader. Intake requires publisher
+metadata within the 48-hour window, a date matching the research citation, an
+actual publisher title and at least 80 extracted words. It stores ordinary source
+records and verifies images; research findings are never substituted for article
+text. Optional research does not create an additional feed. Existing URLs are
+idempotent. A resumed draft must account for the newly available source URLs;
+otherwise the normal desk runs again. Selection, publisher caps, historical
+novelty, factual audit and mandatory coverage remain enforced. Failed extraction
+is logged and cannot waive the coverage requirement.

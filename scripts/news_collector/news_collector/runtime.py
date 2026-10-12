@@ -56,6 +56,8 @@ def build_runtime():
     for collector_config in config["collectors"]:
         if not collector_config.get("enabled", True):
             continue
+        if collector_config["type"] == "coverage_research":
+            continue  # On-demand intake runs after independent coverage research.
         collector_cls = COLLECTOR_TYPES[collector_config["type"]]
         collectors.append(
             collector_cls(

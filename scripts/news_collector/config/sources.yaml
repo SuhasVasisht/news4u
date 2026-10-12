@@ -11,6 +11,7 @@ defaults:
     max: 0
 
 trust_scores:
+  coverage_research: 0.8
   techcrunch: 0.86
   bbc_world: 0.9
   bbc_politics: 0.9
@@ -69,6 +70,10 @@ watchlists:
     - AMD
 
 collectors:
+  - name: coverage_research
+    type: coverage_research
+    enabled: true
+    editorial_limit: 30
   - name: salesforce_news
     type: rss
     enabled: true
