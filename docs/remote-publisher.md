@@ -391,3 +391,14 @@ idempotent. A resumed draft must account for the newly available source URLs;
 otherwise the normal desk runs again. Selection, publisher caps, historical
 novelty, factual audit and mandatory coverage remain enforced. Failed extraction
 is logged and cannot waive the coverage requirement.
+
+Hosted verification checks all archived report and local media bytes with six
+concurrent requests (never more than eight). Transport failures and HTTP 429/5xx
+receive at most three attempts; missing files and hash mismatches fail immediately.
+Progress records identify the host, verification phase, archive and completed file
+count. Requests and browser operations have explicit 30-second timeouts. The
+complete archive is still checked on both Pages and the custom domain. This avoids
+serialized checks growing past the deployment deadline as the archive expands.
+An interrupted upload resumes by comparing the exact live manifest and rechecking
+the existing bundle with `--skip-upload`, rather than generating or uploading a
+second edition.

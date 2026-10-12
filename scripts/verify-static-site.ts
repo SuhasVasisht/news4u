@@ -5,8 +5,14 @@ import { pathToFileURL } from "node:url";
 import { briefingStories, editionSchema, sportsGamesForDisplay } from "../src/lib/edition";
 import { hash } from "./lib/static-release";
 import { embeddedEdition } from "./lib/edition-archive";
+import { verifyHostedFiles } from "./lib/verify-hosted-files";
 
 export async function verifyStaticSite(base: string, root = process.cwd()) {
+  const started = Date.now();
+  const progress = (phase: string, details: Record<string, unknown> = {}) => console.log(JSON.stringify({
+    event: "release_verification", host: new URL(base).hostname, phase, elapsedMs: Date.now() - started, ...details,
+  }));
+  progress("start");
   const edition = editionSchema.parse(JSON.parse(await readFile(path.join(root, "data/edition.json"), "utf8")));
   const expected = await readFile(path.join(root, "data/cloudflare-bundle/index.html"));
   const response = await fetch(base, { cache: "no-store", signal: AbortSignal.timeout(30000) });
@@ -19,6 +25,8 @@ export async function verifyStaticSite(base: string, root = process.cwd()) {
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
     const page = await context.newPage();
+    page.setDefaultTimeout(30_000);
+    page.setDefaultNavigationTimeout(30_000);
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
     page.on("console", message => { if (message.type() === "error" && /hydrat|minified react error/i.test(message.text())) errors.push(message.text()); });
@@ -123,9 +131,11 @@ export async function verifyStaticSite(base: string, root = process.cwd()) {
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.screenshot({ path: path.join(output, "archive-desktop.png") });
     const release = JSON.parse(await readFile(path.join(root, "data/cloudflare-bundle/edition-manifest.json"), "utf8")) as { editions: { date: string; stories: number; path?: string }[]; revisions?: { date: string; stories: number; path: string }[]; files: Record<string, string> };
+    progress("current_edition_passed", { reports: edition.stories.length, images: images.length });
     if (!release.editions?.some(item => item.date === edition.date)) throw new Error("Current edition missing from archive");
     for (const archived of [...release.editions, ...(release.revisions || [])]) {
       const archivedPath = `/editions/${archived.path || archived.date}/`;
+      progress("archive_start", { archive: archived.path || archived.date, reports: archived.stories });
       const result = await page.goto(new URL(archivedPath, base).href);
       if (result?.status() !== 200) throw new Error(`Archived edition unavailable: ${archived.date}`);
       const expectedArchive = embeddedEdition(await readFile(path.join(root, "data/cloudflare-bundle", archivedPath, "index.html"), "utf8"));
@@ -137,16 +147,17 @@ export async function verifyStaticSite(base: string, root = process.cwd()) {
       await page.getByRole("link", { name: "Back to the edition", exact: true }).click();
       await expect(page.locator(".edition-date time")).toHaveAttribute("datetime", archived.date);
       // Verify every archived report's bytes, not just the first navigation target.
-      for (const story of expectedArchive.stories) {
+      const archiveFiles = Object.fromEntries(expectedArchive.stories.map(story => {
         const name = `editions/${archived.path || archived.date}/report-${story.id}.html`;
-        const report = await fetch(new URL(`/${name}`, base), { signal: AbortSignal.timeout(30000) });
-        if (!report.ok || hash(Buffer.from(await report.arrayBuffer())) !== release.files[name]) throw new Error(`Archived report changed or missing: ${name}`);
-      }
+        return [name, release.files[name]];
+      }));
+      await verifyHostedFiles(base, archiveFiles, { progress: (completed, total) => {
+        if (completed % 20 === 0 || completed === total) progress("archive_files", { archive: archived.path || archived.date, completed, total });
+      } });
     }
-    for (const name of Object.keys(release.files).filter(name => name === "news-mark.svg" || name.startsWith("media/"))) {
-      const asset = await fetch(new URL(`/${name}`, base), { signal: AbortSignal.timeout(30000) });
-      if (!asset.ok || hash(Buffer.from(await asset.arrayBuffer())) !== release.files[name]) throw new Error(`Media asset changed or missing: ${name}`);
-    }
+    const mediaFiles = Object.fromEntries(Object.entries(release.files).filter(([name]) => name === "news-mark.svg" || name.startsWith("media/")));
+    await verifyHostedFiles(base, mediaFiles);
+    progress("archive_and_media_passed");
     const noJs = await browser.newContext({ javaScriptEnabled: false });
     const plain = await noJs.newPage();
     await plain.goto(base);
@@ -163,6 +174,7 @@ export async function verifyStaticSite(base: string, root = process.cwd()) {
     if (errors.length) throw new Error(`Browser errors: ${errors.join("; ")}`);
     const result = { url: base, verifiedAt: new Date().toISOString(), date: edition.date, reports: edition.stories.length, images: images.length, editions: release.editions, browserErrors: errors, screenshots: output };
     await writeFile(path.join(output, "result.json"), JSON.stringify(result, null, 2));
+    progress("passed");
     console.log(JSON.stringify(result, null, 2));
   } finally { await browser.close(); }
 }
