@@ -13,6 +13,8 @@ from news_collector.pipeline.edition_audit import (AuditReview, CoverageAuditRev
     StoryAuditReview, build_audit_request, validate_audit, require_publishable)
 from news_collector.pipeline.editorial import codex_review, reader_profile, ReviewBatch, EditionSelection, validate_decisions
 from news_collector.pipeline.publication_history import load_history, history_hash
+from news_collector.utils import canonicalize_url
+from collections import Counter
 from news_collector.pipeline.audit_repair import repairable_ids, reusable_story_checks, prunable_optional_ids, ProseCorrections, apply_corrections
 
 
@@ -74,6 +76,31 @@ def normalize_batch_ids(stories, expected):
         raise ValueError("Final audit story batch must preserve requested ID order")
 
 
+def coverage_context(request):
+    """Coverage needs event context, not another audit of every archived note."""
+    fields = ("id", "date", "title", "url", "eventKey", "summary", "points", "coverage")
+    history, seen = [], set()
+    for entry in request["history"]:
+        brief = {key: entry[key] for key in fields if key in entry}
+        identity = json.dumps(brief, sort_keys=True)
+        if identity not in seen:
+            history.append(brief)
+            seen.add(identity)
+    source_urls = {canonicalize_url(source["url"])
+                   for event in (request.get("checklist") or {}).get("events", [])
+                   for source in event["sources"]}
+    irrelevant = {"outside_editorial_window", "disabled_source", "routine_alert_or_promotion",
+                  "discovery_or_promotional_source", "older_podcast_episode"}
+    candidates, omitted = [], Counter()
+    for item in request.get("candidate_index") or []:
+        if (item.get("decision") == "excluded_before_review" and item.get("reason") in irrelevant
+                and canonicalize_url(item.get("url", "")) not in source_urls):
+            omitted[item["reason"]] += 1
+        else:
+            candidates.append(item)
+    return history, candidates, dict(omitted)
+
+
 def run_batched_audit(request, prompt, output, reused, batch_size=5):
     """Audit evidence in bounded calls, then reconcile coverage independently."""
     reused_ids = {story.id for story in reused}
@@ -114,6 +141,7 @@ def run_batched_audit(request, prompt, output, reused, batch_size=5):
         story_reviews.extend(result.stories)
 
     all_story_reviews = [*story_reviews, *reused]
+    coverage_history, coverage_candidates, omitted_candidates = coverage_context(request)
     coverage_payload = {
         "auditMode": "coverage_reconciliation",
         "policy": request["policy"],
@@ -126,8 +154,9 @@ def run_batched_audit(request, prompt, output, reused, batch_size=5):
             for key in request["selection"]["selected_ids"]
         ],
         "checklist": request["checklist"],
-        "history": request["history"],
-        "candidate_index": request["candidate_index"],
+        "history": coverage_history,
+        "candidate_index": coverage_candidates,
+        "out_of_policy_candidate_counts": omitted_candidates,
     }
     print(f"Final coverage audit: {len(request['checklist']['events']) if request['checklist'] else 0} independently discovered events", flush=True)
     def validate_coverage(result):
@@ -135,7 +164,8 @@ def run_batched_audit(request, prompt, output, reused, batch_size=5):
             "reviewedAt": datetime.now(timezone.utc).isoformat(),
             "review": {"stories": [s.model_dump(mode="json") for s in all_story_reviews],
                        "coverage": [c.model_dump(mode="json") for c in result.coverage]}}, request)
-    coverage = cached_audit(coverage_payload, prompt, output, CoverageAuditReview, validate_coverage)
+    coverage_prompt = prompt.with_name("coverage-audit-prompt.md") if prompt.name == "edition-audit-prompt.md" else prompt
+    coverage = cached_audit(coverage_payload, coverage_prompt, output, CoverageAuditReview, validate_coverage)
     validate_coverage(coverage)
     return AuditReview(stories=all_story_reviews, coverage=coverage.coverage)
 

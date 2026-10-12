@@ -81,7 +81,7 @@ def test_publisher_resumes_repaired_draft_without_reverting_to_original(tmp_path
     assert job.prepare_editorial(None, settings, {}, args) == original
 
 
-@pytest.mark.parametrize('changed', [None, 'source', 'policy', 'history', 'audit', 'expired', 'unselected-source'])
+@pytest.mark.parametrize('changed', [None, 'source', 'policy', 'history', 'audit', 'expired', 'unselected-source', 'partial'])
 def test_approved_snapshot_survives_other_stage_fixes_only_when_all_bindings_hold(tmp_path, monkeypatch, changed):
     import hashlib
     import json
@@ -113,6 +113,7 @@ def test_approved_snapshot_survives_other_stage_fixes_only_when_all_bindings_hol
     if changed == 'history': approved['historyHash'] = 'different-history'
     if changed == 'expired': approved['cutoff'] = (NOW - timedelta(hours=7)).isoformat()
     if changed == 'source': source['title'] = 'Changed report'
+    if changed == 'partial': approved.pop('finalAudit')
     latest = tmp_path / 'data/editorial/latest.json'
     latest.parent.mkdir(parents=True)
     latest.write_text(json.dumps(approved))
@@ -135,5 +136,5 @@ def test_approved_snapshot_survives_other_stage_fixes_only_when_all_bindings_hol
     monkeypatch.setattr(job, 'run_editorial', lambda *a, **kw: {'fresh': True})
     result = job.prepare_editorial(repository, settings, {'collectors': [{'name': p['source']}]},
                                    SimpleNamespace(prepare_review=False, review_file=None))
-    assert result == (approved if changed in (None, 'unselected-source') else {'fresh': True})
+    assert result == (approved if changed in (None, 'unselected-source', 'partial') else {'fresh': True})
     assert bool(verified) == (changed in (None, 'audit', 'unselected-source'))

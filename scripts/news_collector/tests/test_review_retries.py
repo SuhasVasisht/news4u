@@ -264,3 +264,28 @@ def test_research_retry_receives_rejected_checklist_and_all_source_diagnostics(t
     assert 'https://blocked.example.org/first' in calls[1]
     assert 'second-event blocked URL' in calls[1]
     assert 'SAME event IDs' in calls[1]
+
+
+def test_large_archive_is_bounded_before_cli_without_mutating_authoritative_inputs(tmp_path, monkeypatch):
+    from copy import deepcopy
+    history = [{'id': str(i), 'date': '2026-01-01', 'title': 'Unrelated football report',
+                'summary': 'Football results.', 'sections': [{'body': 'Football season ' * 1000}]}
+               for i in range(100)]
+    history.append({'id': 'deno', 'date': '2026-01-01', 'title': 'Cloudflare acquires Deno',
+                    'summary': 'One-year maintenance then shutdown.'})
+    payload = {'packets': [packet()], 'history': history,
+               'decisions': [{'headline': 'Cloudflare Deno maintenance'}],
+               'cutoff': '2026-10-12T16:11:45Z'}
+    original = deepcopy(payload)
+    monkeypatch.setattr(editorial.shutil, 'which', lambda _: '/bin/codex')
+    def run(command, **kwargs):
+        assert len(kwargs['input']) < 1_000_000
+        assert 'history_context_scope' in kwargs['input']
+        assert 'One-year maintenance then shutdown.' in kwargs['input']
+        editorial.Path(command[command.index('-o') + 1]).write_text(
+            editorial.ReviewBatch(decisions=[decision()]).model_dump_json())
+        return SimpleNamespace(returncode=0, stderr='')
+    monkeypatch.setattr(editorial.subprocess, 'run', run)
+    prompt = tmp_path / 'prompt.md';prompt.write_text('Review')
+    assert editorial.codex_review(payload, prompt, tmp_path).decisions
+    assert payload == original

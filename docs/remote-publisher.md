@@ -362,3 +362,20 @@ root domains `gov.uk` and `europa.eu` are primary sources alongside their legiti
 subdomains; removing `www.` must not remove their authority. Look-alike domains do
 not qualify. Independent corroboration is counted by publisher identity in both
 gates, so BBC's two domains cannot be counted as two independent publishers.
+
+Coverage reconciliation has a separate prompt and event-oriented context. It retains
+prior summaries/points and all relevant candidate exclusions, including exact URL
+matches to checklist sources, but omits irrelevant out-of-window, disabled and
+promotional backlog rows with aggregate counts. Full historical prose remains in
+the authoritative audit request and factual/novelty checks. Large model working
+contexts use bounded topical archive retrieval and recent summaries; exact published
+URLs are still checked against the entire archive. Input size and retrieval scope
+are logged, and the runner rejects any remaining oversized request before spending
+a CLI attempt. Growing historical notes must not be blindly repeated into every
+coverage call.
+
+A source-bound, current draft may resume across a code fix after its policy, selected
+source hashes, history and date are revalidated. An unapproved draft still requires
+a fresh independent audit; resuming expensive desk work never grants permission to
+publish. This allows recovery after coverage transport/context failures without
+throwing away valid factual batches or manually editing checkpoints.

@@ -27,8 +27,8 @@ def prepare_editorial(repository, settings, config, args):
             return saved["review"]
     latest = output / "latest.json"
     if can_resume and latest.exists():
-        # Code fixes to another stage must not discard an already approved desk.
-        # Revalidate its policy, source snapshot, history, date and complete audit.
+        # Preserve source-bound desk work across stage fixes. A draft without
+        # approval must still run the independent audit; reuse is not permission.
         from news_collector.pipeline.editorial import POLICY_VERSION, reader_profile, source_hash, ReviewBatch, validate_decisions
         from news_collector.pipeline.publication_history import load_history, history_hash
         from news_collector.pipeline.quality_review import verify_final_audit
@@ -50,15 +50,18 @@ def prepare_editorial(repository, settings, config, args):
                 # of the same URL must not overwrite its current input hash.
                 current.setdefault((row["source"], row["canonical_url"]), source_hash(row))
             selected = set(approved["selection"]["selected_ids"])
-            if (approved.get("finalAudit") and approved["policy"] == policy
+            if (approved["policy"] == policy
                     and approved["historyHash"] == history_hash(history)
                     and cutoff.astimezone(ZoneInfo(profile["timezone"])).date().isoformat() == date
                     and timedelta(0) <= now - cutoff < timedelta(hours=6)
                     and all(p["source"] in enabled and p.get("inputHash")
                             == current.get((p["source"], p["url"])) for p in approved["packets"] if p["id"] in selected)):
                 validate_decisions(ReviewBatch(decisions=list(approved["decisions"].values())), approved["packets"])
-                verify_final_audit(approved, history, now)
-                print("Resuming the independently approved editorial snapshot after policy/source/history validation", flush=True)
+                if approved.get("finalAudit"):
+                    verify_final_audit(approved, history, now)
+                    print("Resuming the independently approved editorial snapshot after policy/source/history validation", flush=True)
+                else:
+                    print("Resuming the source-bound editorial draft; independent final audit still required", flush=True)
                 atomic_json(marker, {"key": key, "review": approved})
                 return approved
         except (ValueError, KeyError):

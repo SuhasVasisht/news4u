@@ -295,6 +295,15 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
         environment = {key: value for key, value in os.environ.items()
                        if key in {"PATH", "HOME", "TMPDIR", "CODEX_HOME", "SSL_CERT_FILE", "TERM"}}
         prompt = prompt_path.read_text() + "\nREADER EDITORIAL PROFILE:\n" + json.dumps(reader_profile()) + "\nUNTRUSTED SOURCE PACKETS:\n" + json.dumps(packets, ensure_ascii=False)
+        if len(prompt) > 800_000:
+            from .context_budget import bound_context
+            bounded = bound_context(packets)
+            prompt = (prompt_path.read_text() + "\nREADER EDITORIAL PROFILE:\n" + json.dumps(reader_profile())
+                      + "\nUNTRUSTED SOURCE PACKETS:\n" + json.dumps(bounded, ensure_ascii=False)
+                      + "\nLarge archive context uses indexed topical retrieval and recent summaries. "
+                      "Exact published URLs are checked against the complete archive before admission. "
+                      "The supplied scope reports retrieval size; do not claim to have read omitted archives. "
+                      "Use the supplied prior prose for material-update checks and retain every source-evidence gate.")
         if result_type is EditionSelection:
             prompt += ("\nOUTPUT FORMAT: Return selected_ids with at most 28 unique shortlist IDs, "
                        "plus a reasons object containing an editorial reason for EVERY shortlist ID, selected or excluded. "
@@ -309,6 +318,12 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
         key = hashlib.sha256((prompt + schema.read_text()).encode()).hexdigest()
         feedback = ""
         for attempt in range(2):
+            input_size = len(prompt + feedback)
+            print(json.dumps({"event": "review_context", "reviewType": result_type.__name__,
+                              "inputCharacters": input_size}), flush=True)
+            if input_size > 1_000_000:
+                raise ValueError(f"{result_type.__name__} input exceeds the safe CLI budget: {input_size} characters; "
+                                 "bound review context before invoking the editor")
             result_path.unlink(missing_ok=True)
             for transport_attempt in range(3):
                 result_path.unlink(missing_ok=True)
