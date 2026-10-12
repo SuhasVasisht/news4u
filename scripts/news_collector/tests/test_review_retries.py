@@ -232,3 +232,35 @@ def test_sports_subclass_schema_constrains_exact_evidence_and_retry_explains_ids
     assert editorial.codex_review({'packets': [packet()]}, prompt, tmp_path, SportsReview).decisions
     assert len(calls) == 2
     assert "use only individual chunk IDs: ['p1']" in calls[1]
+
+
+def test_research_retry_receives_rejected_checklist_and_all_source_diagnostics(tmp_path, monkeypatch):
+    from news_collector.pipeline.edition_audit import IndependentChecklist
+    calls = []
+    payload = {'checkedAt': datetime.now(timezone.utc).isoformat(),
+        'method': 'independent_web_research', 'researcher': 'Independent desk',
+        'scope': ['World'], 'queries': ['energy ceasefire'], 'events': [
+            {'id': 'first-event', 'event': 'First consequential event', 'sector': 'World', 'mustCover': True,
+             'sources': [{'url': 'https://blocked.example.org/first', 'publishedAt': '2026-10-12T05:00:00Z',
+                          'finding': 'First source describes the claimed new development.'}]},
+            {'id': 'second-event', 'event': 'Second consequential event', 'sector': 'World', 'mustCover': True,
+             'sources': [{'url': 'https://blocked.example.org/second', 'publishedAt': '2026-10-12T06:00:00Z',
+                          'finding': 'Second source describes the claimed new development.'}]}]}
+    monkeypatch.setattr(editorial.shutil, 'which', lambda _: '/bin/codex')
+    def run(command, **kwargs):
+        calls.append(kwargs['input'])
+        editorial.Path(command[command.index('-o') + 1]).write_text(json.dumps(payload))
+        return SimpleNamespace(returncode=0, stderr='')
+    monkeypatch.setattr(editorial.subprocess, 'run', run)
+    def validate(result):
+        if len(calls) == 1:
+            raise ValueError('first-event bad publication date; ' + 'source diagnostics ' * 40
+                             + '; second-event blocked URL https://blocked.example.org/second')
+    prompt = tmp_path / 'research.md';prompt.write_text('Research sources')
+    result = editorial.codex_review({'cutoff': '2026-10-12T14:11:05Z'}, prompt, tmp_path,
+                                   IndependentChecklist, validate_result=validate)
+    assert len(calls) == 2 and len(result.events) == 2
+    assert 'UNTRUSTED REJECTED CHECKLIST' in calls[1]
+    assert 'https://blocked.example.org/first' in calls[1]
+    assert 'second-event blocked URL' in calls[1]
+    assert 'SAME event IDs' in calls[1]

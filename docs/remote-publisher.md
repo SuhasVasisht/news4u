@@ -347,3 +347,12 @@ corrected prior summary invalidates review reuse. The independent audit compares
 purported updates with what readers already saw, rather than judging novelty from
 headlines alone. Details already present in a previous summary cannot qualify as
 new developments just because a different publisher repeats them.
+
+Coverage-source repair preserves the rejected checklist's event IDs. The ephemeral
+reviewer receives its complete rejected JSON and all failed source diagnostics,
+including claimed versus publisher dates and article length, rather than a
+truncated first error. Verified mandatory events remain mandatory, and repair may
+not introduce unrelated new mandatory events. Source checking reports every bad
+requirement in one pass while retaining its successful checks and network cache.
+This repairs research inputs without admitting unverified blocking requirements
+or increasing the bounded model retry count.

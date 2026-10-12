@@ -14,6 +14,12 @@ import httpx
 from .edition_audit import IndependentChecklist
 
 
+class CoverageVerificationError(ValueError):
+    def __init__(self, failures, verified_ids):
+        self.verified_ids = set(verified_ids)
+        super().__init__("; ".join(failures))
+
+
 def validate_checklist(payload, cutoff, profile, now=None):
     now = now or datetime.now(timezone.utc)
     if cutoff.tzinfo is None:
@@ -61,9 +67,10 @@ def verify_must_cover_sources(payload, cutoff, cache=None):
         return
     if sum(len(event["sources"]) for event in events) > 30:
         raise ValueError("Must-cover source verification is limited to 30 direct sources")
+    failures, verified_ids = [], []
     with httpx.Client(timeout=10, follow_redirects=False, headers={"User-Agent": "News4u coverage verifier"}) as client:
         for event in events:
-            verified = []
+            verified, diagnostics = [], []
             for source in event["sources"]:
                 url = source["url"]
                 if url not in cache:
@@ -77,6 +84,9 @@ def verify_must_cover_sources(payload, cutoff, cache=None):
                         cache[url] = (None, 0, url)
                         print(f"Coverage source unavailable: {url} ({type(exc).__name__})", flush=True)
                 actual, words, final_url = cache[url]
+                diagnostics.append({"url": url, "claimedDate": source["publishedAt"],
+                                    "publisherDate": actual.isoformat() if actual else None,
+                                    "articleWords": words})
                 claimed = datetime.fromisoformat(source["publishedAt"])
                 if (actual is not None and actual.tzinfo is not None and words >= 80
                         and claimed.date() in {actual.date(), actual.astimezone(timezone.utc).date()} and actual <= cutoff + timedelta(minutes=5)):
@@ -85,16 +95,22 @@ def verify_must_cover_sources(payload, cutoff, cache=None):
             primary = any(host.endswith((".gov", ".gov.uk", ".europa.eu", ".int"))
                           or host in {"ecb.europa.eu", "who.int"} for _, host, _ in fresh)
             if not fresh or not (primary or len({identity for _, _, identity in verified}) >= 2):
-                raise ValueError(f"Must-cover event {event['id']} lacks accessible publisher-dated evidence of a new development. "
-                                 "Find direct dated primary evidence or independent corroboration; "
-                                 "background topic pages and unavailable articles cannot establish a blocking requirement.")
-            print(f"Coverage requirement verified: {event['id']} ({len(verified)} dated sources)", flush=True)
+                failures.append(f"Must-cover event {event['id']} lacks accessible publisher-dated evidence of a new development. "
+                                "Replace unavailable/undated sources or correct claimed dates using publisher metadata: "
+                                + json.dumps(diagnostics))
+            else:
+                verified_ids.append(event['id'])
+                print(f"Coverage requirement verified: {event['id']} ({len(verified)} dated sources)", flush=True)
+    if failures:
+        # Report every problem together; fail-fast feedback hid later bad sources.
+        raise CoverageVerificationError(failures, verified_ids)
+    return set(verified_ids)
 
 def discover_coverage(output, cutoff, profile, checklist_file=None):
     """Return and persist a validated checklist; errors leave the prior file untouched."""
     output = Path(output)
     prompt_path = Path(__file__).resolve().parents[2] / "config" / "coverage-discovery-prompt.md"
-    context = {"sourceVerificationVersion": 1, "profile": profile, "prompt": prompt_path.read_text(),
+    context = {"sourceVerificationVersion": 2, "profile": profile, "prompt": prompt_path.read_text(),
                "model": os.environ.get("NEWS_EDITOR_MODEL", "default"),
                "effort": os.environ.get("NEWS_EDITOR_REASONING_EFFORT", "default")}
     context_path = output.with_suffix(".context.json")
@@ -113,9 +129,23 @@ def discover_coverage(output, cutoff, profile, checklist_file=None):
         research = {"cutoff": cutoff.isoformat(), "profile": profile,
                     "windowStart": (cutoff - timedelta(hours=48)).isoformat()}
         checked_sources = {}
+        original_ids, original_mandatory, verified_mandatory = None, set(), set()
         def validate_research(result):
+            nonlocal original_ids, original_mandatory
+            ids = {event.id for event in result.events}
+            mandatory = {event.id for event in result.events if event.mustCover}
+            if original_ids is None:
+                original_ids, original_mandatory = ids, mandatory
+            elif ids != original_ids or not mandatory <= original_mandatory:
+                raise ValueError("Research repair must preserve the rejected checklist's event IDs and cannot introduce new mandatory events")
+            if not verified_mandatory <= mandatory:
+                raise ValueError("Research repair cannot waive an already verified mandatory event")
             candidate = validate_checklist(result.model_dump(mode="json"), cutoff, profile)
-            verify_must_cover_sources(candidate, cutoff, checked_sources)
+            try:
+                verified_mandatory.update(verify_must_cover_sources(candidate, cutoff, checked_sources) or set())
+            except CoverageVerificationError as exc:
+                verified_mandatory.update(exc.verified_ids)
+                raise
         print(f"Coverage discovery: starting independent research for cutoff {cutoff.isoformat()}", flush=True)
         result = codex_review(research, prompt_path, output.parent, IndependentChecklist,
             allow_web=True, validate_result=validate_research)

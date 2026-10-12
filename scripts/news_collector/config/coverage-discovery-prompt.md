@@ -46,3 +46,9 @@ A blocked report plus an older background page cannot establish a new mandatory
 development. If verification feedback rejects a requirement, find verifiable
 primary evidence or independent dated corroboration; use optional coverage when
 you cannot establish that this is a verified new development. Do not invent dates.
+
+On validation retry, repair the supplied rejected checklist rather than running
+an unrelated new search and replacing its events. Preserve every event ID. Do not
+introduce new mandatory events during repair, and retain already verified mandatory
+events. Address ALL source diagnostics. Replace blocked or undated URLs with
+accessible direct articles from alternative publishers, using their real dates.
