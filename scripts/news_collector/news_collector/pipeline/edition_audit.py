@@ -116,9 +116,9 @@ def _must_cover(event):
     if not event.mustCover:
         return False
     hosts = {urlparse(str(source.url)).hostname or "" for source in event.sources}
-    authoritative = any(host.endswith((".gov", ".gov.uk", ".europa.eu", ".int"))
-                        or host in {"ecb.europa.eu", "who.int"} for host in hosts)
-    return authoritative or len(hosts) >= 2
+    from .publishers import authoritative_host, publisher
+    authoritative = any(authoritative_host(host) for host in hosts)
+    return authoritative or len({publisher(str(source.url)) for source in event.sources}) >= 2
 
 
 def build_audit_request(packets, decisions, selection, history, checklist, now=None, candidate_index=None):

@@ -356,3 +356,9 @@ not introduce unrelated new mandatory events. Source checking reports every bad
 requirement in one pass while retaining its successful checks and network cache.
 This repairs research inputs without admitting unverified blocking requirements
 or increasing the bounded model retry count.
+
+Discovery and final audit share the same authoritative-host classification. The
+root domains `gov.uk` and `europa.eu` are primary sources alongside their legitimate
+subdomains; removing `www.` must not remove their authority. Look-alike domains do
+not qualify. Independent corroboration is counted by publisher identity in both
+gates, so BBC's two domains cannot be counted as two independent publishers.

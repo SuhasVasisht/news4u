@@ -141,3 +141,23 @@ def test_source_repair_cannot_replace_events_or_waive_verified_requirements(tmp_
     with pytest.raises(ValueError, match='Research repair'):
         discovery.discover_coverage(original, NOW, {})
     assert original.read_text() == '{"prior": true}'
+
+
+@pytest.mark.parametrize('host', ['gov.uk', 'www.gov.uk', 'europa.eu', 'www.europa.eu', 'agency.gov',
+                                  'who.int', 'ecb.europa.eu'])
+def test_authoritative_root_domains_pass_both_discovery_and_final_audit(monkeypatch, host):
+    from news_collector.pipeline.edition_audit import DiscoveryEvent, _must_cover
+    monkeypatch.setattr(images, 'download', lambda _, url, __: (
+        b'<meta property="article:published_time" content="2026-10-07T12:00:00Z">', url))
+    monkeypatch.setattr(extract, 'extract_text_from_html', lambda *_: 'primary report ' * 100)
+    payload = event(f'https://{host}/news/report')
+    discovery.verify_must_cover_sources(payload, NOW)
+    item = {**payload['events'][0], 'event': 'Important primary government announcement', 'sector': 'Policy'}
+    item['sources'][0]['finding'] = 'Direct primary evidence confirms the new development.'
+    assert _must_cover(DiscoveryEvent.model_validate(item)) is True
+
+
+@pytest.mark.parametrize('host', ['gov.uk.example.org', 'fakegov.uk', 'europa.eu.example.org', 'fake-europa.eu'])
+def test_lookalike_domains_do_not_gain_primary_source_authority(host):
+    from news_collector.pipeline.publishers import authoritative_host
+    assert authoritative_host(host) is False

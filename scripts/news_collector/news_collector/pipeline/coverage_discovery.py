@@ -60,7 +60,7 @@ def verify_must_cover_sources(payload, cutoff, cache=None):
     from .images import download
     from .publication_dates import article_publication_date
     from .extract import extract_text_from_html
-    from .publishers import publisher
+    from .publishers import publisher, authoritative_host
     cache = cache if cache is not None else {}
     events = [event for event in payload["events"] if event["mustCover"]]
     if not events:
@@ -92,8 +92,7 @@ def verify_must_cover_sources(payload, cutoff, cache=None):
                         and claimed.date() in {actual.date(), actual.astimezone(timezone.utc).date()} and actual <= cutoff + timedelta(minutes=5)):
                     verified.append((actual, (urlparse(final_url).hostname or "").removeprefix("www."), publisher(final_url)))
             fresh = [(date, host, identity) for date, host, identity in verified if date >= cutoff - timedelta(hours=48)]
-            primary = any(host.endswith((".gov", ".gov.uk", ".europa.eu", ".int"))
-                          or host in {"ecb.europa.eu", "who.int"} for _, host, _ in fresh)
+            primary = any(authoritative_host(host) for _, host, _ in fresh)
             if not fresh or not (primary or len({identity for _, _, identity in verified}) >= 2):
                 failures.append(f"Must-cover event {event['id']} lacks accessible publisher-dated evidence of a new development. "
                                 "Replace unavailable/undated sources or correct claimed dates using publisher metadata: "

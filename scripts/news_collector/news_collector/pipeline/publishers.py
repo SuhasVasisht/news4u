@@ -2,6 +2,11 @@
 from urllib.parse import urlparse
 from collections import Counter
 
+def authoritative_host(host: str) -> bool:
+    host = host.lower().removeprefix("www.")
+    return (host in {"gov.uk", "europa.eu", "who.int", "ecb.europa.eu"}
+            or host.endswith((".gov", ".gov.uk", ".europa.eu", ".int")))
+
 def publisher(url: str) -> str:
     host = (urlparse(url).hostname or "").removeprefix("www.")
     return {"bbc.com": "BBC", "bbc.co.uk": "BBC", "techcrunch.com": "TechCrunch", "theguardian.com": "The Guardian", "apnews.com": "AP", "arxiv.org": "arXiv", "sec.gov": "SEC", "techmeme.com": "Techmeme", "news.ycombinator.com": "Hacker News",
