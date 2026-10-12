@@ -328,3 +328,15 @@ Changing independent discovery requires a new coverage reconciliation, while
 unchanged approved factual checks can be reused with identical policy, cutoff,
 history, packets and prose and no added selected stories. The new complete audit
 still validates every story, coverage requirement and duplicate event.
+
+Audited export evaluates article age and analysis placement at the same frozen
+`review.cutoff` used by selection and independent audit. A story that reaches the
+48-hour limit during review or retry remains eligible for that edition; its
+publisher timestamp is never changed. The cutoff must be timezone-aware, no more
+than 24 hours old, not in the future, and match the edition date (including an
+explicitly requested late revision). Changed source evidence, invalid cutoffs,
+failed audits, publisher limits and cross-midnight publication still block.
+Export logs the cutoff, actual export time and approved selection size. Regression
+coverage includes the October 11 boundary failure, delayed retries, government
+and longform windows, stable analysis sectors, stale/future/malformed cutoffs,
+and articles already ineligible at the original cutoff.

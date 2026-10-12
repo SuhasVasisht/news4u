@@ -115,6 +115,18 @@ def assemble_reviewed(rows, review, now, timezone_name, history=None, discoverie
     if not reviewed_at or now - reviewed_at > timedelta(hours=24) or reviewed_at > now + timedelta(minutes=5):
         raise RuntimeError("Current editorial review required before publishing")
     edition_date = edition_date or now.astimezone(ZoneInfo(timezone_name)).date().isoformat()
+    eligibility_cutoff = now
+    if audited_selection:
+        # Admission is relative to the edition's evidence snapshot. Reapplying
+        # a moving window after review silently changes the approved selection.
+        try:
+            eligibility_cutoff = datetime.fromisoformat(review["cutoff"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError("Audited export requires a valid edition cutoff") from exc
+        if (eligibility_cutoff.tzinfo is None
+                or not timedelta(0) <= now - eligibility_cutoff <= timedelta(hours=24)
+                or eligibility_cutoff.astimezone(ZoneInfo(timezone_name)).date().isoformat() != edition_date):
+            raise RuntimeError("Audited export cutoff must be current and match the edition date")
     packets = {p["id"]: p for p in review["packets"]}
     decisions = {key: Decision.model_validate(value) for key, value in review["decisions"].items()}
     if any(key != decision.id for key, decision in decisions.items()):
@@ -137,14 +149,17 @@ def assemble_reviewed(rows, review, now, timezone_name, history=None, discoverie
             raise RuntimeError("Source changed since editorial review; review again before publication")
         if row and needs_publisher_date(row) and packet.get("publicationDateBasis") != "publisher_metadata":
             raise RuntimeError("Newsletter-linked article requires publisher date verification; repeat editorial review")
-        if not row or exclusion({**row, "published_at": packet["publishedAt"]}, now):
+        reason = exclusion({**row, "published_at": packet["publishedAt"]}, eligibility_cutoff)
+        if reason:
+            if audited_selection:
+                raise RuntimeError(f"Audited story {key} is ineligible at edition cutoff: {reason}")
             rejected.append({"id": key, "reason": selection_reasons.get(key, decision.reason)})
             continue
         prior = prior_match(packet["url"], packet["title"], history or [], edition_date)
         if prior:
             raise RuntimeError(f"Previously published story selected again: {key} from {prior['date']}")
         sector = "Listening room" if decision.kind == "podcast" else decision.sector or packet.get("sector") or SECTORS.get(packet["category"], "Other")
-        if decision.kind == "analysis" and now - parse_datetime(row["published_at"]) > timedelta(hours=48):
+        if decision.kind == "analysis" and eligibility_cutoff - parse_datetime(packet["publishedAt"]) > timedelta(hours=48):
             sector = "Reading room"
         stories.append({
             "id": key, "title": decision.headline, "summary": decision.summary,
@@ -183,7 +198,7 @@ def assemble_reviewed(rows, review, now, timezone_name, history=None, discoverie
     snapshot = {"date": edition_date,
                 "generatedAt": now.isoformat(), "timezone": timezone_name, "windowHours": 48,
                 "stories": selected, "sources": [], "editorialReviewedAt": review["generatedAt"]}
-    eligible_rows = [row for row in rows if not exclusion(row, now)]
+    eligible_rows = [row for row in rows if not exclusion(row, eligibility_cutoff)]
     eligible_urls = {row["canonical_url"] for row in eligible_rows}
     audit = {"generated_at": now.isoformat(), "selected_stories": len(selected),
              "screened_candidates": len(packets),
@@ -246,6 +261,8 @@ def main() -> None:
     discoveries = repository.source_discoveries()
     from news_collector.pipeline.quality_review import verify_final_audit
     final_audit = verify_final_audit(review, history, now)
+    print(json.dumps({"event": "export_audited_selection", "cutoff": review["cutoff"],
+                      "exportedAt": now.isoformat(), "selected": len(review["selection"]["selected_ids"])}), flush=True)
     snapshot, audit = assemble_reviewed(rows, review, now, zone, history,
                                        [r for r in discoveries if r["source"] in enabled], audited_selection=True, edition_date=edition_date)
     if [s["id"] for s in snapshot["stories"]] != review["selection"]["selected_ids"]:
