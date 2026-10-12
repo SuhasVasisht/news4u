@@ -30,3 +30,36 @@ def test_history_retains_audited_event_identity(tmp_path):
     (root / "edition.json").write_text(json.dumps({"date": "2026-09-09", "editorialReviewedAt": "reviewed",
         "stories": [{"id": "story", "title": "Report", "url": "https://example.org/report", "eventKey": "bank-rate-decision"}]}))
     assert load_history(tmp_path, "2026-09-10")[0]["eventKey"] == "bank-rate-decision"
+
+
+def test_prior_prose_is_available_and_bound_to_history_identity(tmp_path):
+    from news_collector.pipeline.publication_history import history_hash
+    folder = tmp_path / 'data/cloudflare-published/editions/2026-10-10'
+    folder.mkdir(parents=True)
+    story = {'id': 'deno', 'title': 'Cloudflare acquires Deno', 'url': 'https://example.org/original',
+             'summary': 'The runtime receives maintenance for a year.',
+             'points': ['Monthly bug fixes and security updates last one year.'],
+             'sections': [{'heading': 'What ends', 'body': 'Runtime development will cease.'}],
+             'caveats': ['Financial terms were not disclosed.'], 'kind': 'reporting'}
+    edition = {'date': '2026-10-10', 'editorialReviewedAt': 'reviewed', 'stories': [story]}
+    path = folder / 'edition.json'
+    path.write_text(json.dumps(edition))
+    before = load_history(tmp_path, '2026-10-11')
+    for field in ('summary', 'points', 'sections', 'caveats', 'kind'):
+        assert before[0][field] == story[field]
+    story['summary'] = 'A corrected previously published summary.'
+    path.write_text(json.dumps(edition))
+    assert history_hash(before) != history_hash(load_history(tmp_path, '2026-10-11'))
+
+
+def test_superseded_versions_keep_their_own_prose_for_novelty_checks(tmp_path):
+    for directory, summary in [('2026-10-10', 'Maintenance will last one year.'),
+                                ('2026-10-10-rabcdef123456', 'The original contract was confirmed.')]:
+        folder = tmp_path / 'data/cloudflare-published/editions' / directory
+        folder.mkdir(parents=True)
+        (folder / 'edition.json').write_text(json.dumps({'date': '2026-10-10',
+            'editorialReviewedAt': 'reviewed', 'stories': [{'id': 'same', 'title': 'Original event',
+            'url': 'https://example.org/report', 'summary': summary}]}))
+    history = load_history(tmp_path, '2026-10-11')
+    assert {entry['summary'] for entry in history} == {
+        'Maintenance will last one year.', 'The original contract was confirmed.'}

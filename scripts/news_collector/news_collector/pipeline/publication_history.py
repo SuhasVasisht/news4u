@@ -23,6 +23,12 @@ def load_history(root, edition_date):
                      "url": story["url"], "coverage": story.get("coverage", [])}
             if story.get("eventKey"):
                 entry["eventKey"] = story["eventKey"]
+            # A headline cannot establish whether purported update details were
+            # already published. Bind the complete public prose into history and
+            # its hash so selection/audit caches cannot omit or ignore it.
+            for key in ("summary", "points", "sections", "caveats", "kind"):
+                if key in story:
+                    entry[key] = story[key]
             history.append(entry)
     return history
 

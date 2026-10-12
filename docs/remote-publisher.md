@@ -340,3 +340,10 @@ Export logs the cutoff, actual export time and approved selection size. Regressi
 coverage includes the October 11 boundary failure, delayed retries, government
 and longform windows, stable analysis sectors, stale/future/malformed cutoffs,
 and articles already ineligible at the original cutoff.
+
+Published history includes the actual public summary, points, notes and caveats
+from every prior edition and superseded version. Its hash binds this prose, so a
+corrected prior summary invalidates review reuse. The independent audit compares
+purported updates with what readers already saw, rather than judging novelty from
+headlines alone. Details already present in a previous summary cannot qualify as
+new developments just because a different publisher repeats them.

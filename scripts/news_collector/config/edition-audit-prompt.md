@@ -38,6 +38,12 @@ headlines about the same event. Record priorStoryIds and only permit repeat
 coverage with a concrete materialUpdate and cited materialUpdateEvidence. Separate
 new facts from repackaged commentary; reject promotional filler. Multiple selected
 accounts of one event normally require consolidation, not different event keys.
+History includes the actual previously published summaries, points and notes.
+Read them when evaluating a proposed material update. A detail already stated in
+ANY prior version is not new, even if absent from that version's headline. A new
+publisher, URL, publication date, richer background or commentary cannot alone
+justify repeat coverage. Hold the story when no concrete new development remains;
+do not invent a material update merely to retain an admitted story.
 
 The checklist is independently researched discovery input, NOT a list you may
 invent by looking at the selected articles. Review every checklist event once.
