@@ -145,7 +145,8 @@ def test_source_repair_cannot_replace_events_or_waive_verified_requirements(tmp_
 
 @pytest.mark.parametrize('host', ['gov.uk', 'www.gov.uk', 'europa.eu', 'www.europa.eu', 'agency.gov',
                                   'who.int', 'ecb.europa.eu', 'pib.gov.in', 'agency.gov.au',
-                                  'agency.gc.ca', 'agency.gouv.fr', 'agency.go.jp', 'agency.govt.nz'])
+                                  'agency.gc.ca', 'agency.gouv.fr', 'agency.go.jp', 'agency.govt.nz',
+                                  'gov.in', 'gouv.fr', 'govt.nz', 'agency.gov.cn', 'agency.gob.mx'])
 def test_authoritative_root_domains_pass_both_discovery_and_final_audit(monkeypatch, host):
     from news_collector.pipeline.edition_audit import DiscoveryEvent, _must_cover
     monkeypatch.setattr(images, 'download', lambda _, url, __: (

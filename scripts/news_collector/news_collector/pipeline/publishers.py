@@ -14,10 +14,10 @@ PUBLIC_INSTITUTIONS = {
     "unhcr.org": "UNHCR", "unicef.org": "UNICEF", "ohchr.org": "UN Human Rights Office",
     "canada.ca": "Government of Canada",
 }
-PUBLIC_ROOTS = {"gov.uk", "europa.eu"}
 PUBLIC_SUFFIXES = (".gov", ".gov.uk", ".europa.eu", ".int", ".gov.in", ".gov.au",
                    ".gc.ca", ".gouv.fr", ".go.jp", ".govt.nz", ".gov.br", ".gov.za",
-                   ".admin.ch", ".bund.de")
+                   ".admin.ch", ".bund.de", ".gov.cn", ".gob.mx")
+PUBLIC_ROOTS = {suffix[1:] for suffix in PUBLIC_SUFFIXES if "." in suffix[1:]}
 
 def public_institution(host):
     host = host.lower().rstrip(".").removeprefix("www.")
