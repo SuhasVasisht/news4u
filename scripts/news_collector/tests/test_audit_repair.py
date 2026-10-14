@@ -80,14 +80,14 @@ def test_changed_review_inputs_prevent_reuse(key):
     assert not reusable_story_checks(request, changed, report)
 
 
-def test_held_and_incomplete_checks_cannot_be_reused():
+def test_held_and_incomplete_checks_remain_findings_for_unchanged_evidence():
     request, envelope = fixture()
     report = validate_audit(envelope, request, NOW)
     report.review.stories[0].verdict = "hold"
-    assert not reusable_story_checks(request, request, report)
+    assert reusable_story_checks(request, request, report)[0].verdict == "hold"
     report.review.stories[0].verdict = "pass"
     report.blockers.append("a: headline lacks checks")
-    assert not reusable_story_checks(request, request, report)
+    assert len(reusable_story_checks(request, request, report)) == 1
     report.review.stories[0].claims[0].verdict = "uncertain"
     assert repairable_ids(report) == ["a"]
 
@@ -102,7 +102,7 @@ def test_plain_prose_removes_internal_chunk_markers_without_changing_claims():
     assert result.evidence == before
 
 
-def test_removal_only_selection_reuses_unchanged_checks_but_added_stories_do_not():
+def test_selection_changes_reuse_only_unchanged_individual_story_checks():
     request, envelope = fixture()
     report = validate_audit(envelope, request, NOW)
     before = deepcopy(request)
@@ -110,7 +110,7 @@ def test_removal_only_selection_reuses_unchanged_checks_but_added_stories_do_not
     before['packets'].append({**before['packets'][0], 'id': 'b'})
     before['decisions'].append({**before['decisions'][0], 'id': 'b'})
     assert [story.id for story in reusable_story_checks(before, request, report)] == ['a']
-    assert reusable_story_checks(request, before, report) == []
+    assert [story.id for story in reusable_story_checks(request, before, report)] == ['a']
     changed = deepcopy(request)
     changed['packets'][0]['chunks'][0]['text'] = 'Changed evidence'
     assert reusable_story_checks(before, changed, report) == []
@@ -122,3 +122,58 @@ def test_new_discovery_requires_fresh_coverage_but_can_reuse_identical_factual_c
     changed = deepcopy(request)
     changed["checklist"]["events"][0]["event"] = "New independently researched coverage context"
     assert [story.id for story in reusable_story_checks(request, changed, report)] == ["a"]
+
+
+def test_same_edition_retry_preserves_hold_when_only_clock_and_other_selections_change():
+    from datetime import timedelta
+    request, envelope = fixture()
+    report = validate_audit(envelope, request, NOW)
+    report.review.stories[0].verdict = "hold"
+    later = deepcopy(request)
+    later['cutoff'] = (NOW + timedelta(hours=1)).isoformat()
+    later['selection']['selected_ids'].append('b')
+    later['packets'].append({**deepcopy(later['packets'][0]), 'id': 'b'})
+    later['decisions'].append({**deepcopy(later['decisions'][0]), 'id': 'b'})
+    assert reusable_story_checks(request, later, report)[0].verdict == 'hold'
+    later['cutoff'] = (NOW + timedelta(hours=24)).isoformat()
+    assert reusable_story_checks(request, later, report) == []
+
+
+@pytest.mark.parametrize('change', [None, 'evidence', 'prose', 'history', 'next_day', 'expired'])
+def test_archived_unchanged_hold_wins_over_a_later_accidental_approval(tmp_path, monkeypatch, change):
+    from datetime import datetime, timedelta
+    from news_collector.pipeline import quality_review
+    from news_collector.pipeline.edition_audit import build_audit_request
+    request, envelope = fixture()
+    history = [{'id': 'yesterday', 'eventKey': 'bank-rate-decision'}]
+    old = build_audit_request(request['packets'], request['decisions'], request['selection'],
+                              history, request['checklist'], NOW - timedelta(hours=1))
+    held = deepcopy(envelope)
+    held.update(requestHash=old['requestHash'], reviewedAt=(NOW - timedelta(hours=1)).isoformat())
+    held['review']['stories'][0].update(verdict='hold', priorStoryIds=['yesterday'])
+    current = build_audit_request(old['packets'], old['decisions'], old['selection'], history, old['checklist'], NOW)
+    accidental = deepcopy(envelope)
+    accidental['requestHash'] = current['requestHash']
+    accidental['review']['stories'][0]['event_key'] = 'mistaken-new-event-label'
+    assert validate_audit(accidental, current, NOW).status == 'passed'
+    (tmp_path / 'audit-record-a-held.json').write_text(json.dumps({'request': old, 'response': held}))
+    (tmp_path / 'audit-record-z-passed.json').write_text(json.dumps({'request': current, 'response': accidental}))
+    clock = type('Clock', (datetime,), {'now': classmethod(lambda cls, tz=None: NOW)})
+    monkeypatch.setattr(quality_review, 'datetime', clock)
+    monkeypatch.setattr('news_collector.pipeline.edition_audit.datetime', clock)
+    if change == 'evidence':
+        current['packets'][0]['chunks'][0]['text'] = 'Changed source facts'
+    elif change == 'prose':
+        current['decisions'][0]['summary'] = 'A changed draft needs its own audit.'
+    elif change == 'history':
+        current['history'].append({'id': 'another-published-story'})
+    elif change == 'next_day':
+        current['cutoff'] = (NOW + timedelta(days=1)).isoformat()
+    elif change == 'expired':
+        current['cutoff'] = (NOW + timedelta(hours=7)).isoformat()
+    reused = [] if change else quality_review.StoryAuditReview(stories=accidental['review']['stories']).stories
+    checks = quality_review.archived_story_checks(tmp_path, current, reused, 'America/Los_Angeles')
+    if change:
+        assert checks == []
+    else:
+        assert checks[0].verdict == 'hold' and checks[0].priorStoryIds == ['yesterday']

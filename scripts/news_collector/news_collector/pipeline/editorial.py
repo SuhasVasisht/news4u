@@ -250,6 +250,9 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
         if issubclass(result_type, ReviewBatch):
             candidates = packets if isinstance(packets, list) else packets["packets"]
             contract["$defs"]["Decision"]["properties"]["id"]["enum"] = [p["id"] for p in candidates]
+            duplicate = contract["$defs"]["Decision"]["properties"]["duplicate_of"]
+            duplicate["anyOf"] = ([{"type": "string", "enum": [p["id"] for p in candidates]}]
+                                  if candidates else []) + [{"type": "null"}]
             refs = sorted({chunk["id"] for p in candidates for chunk in p["chunks"]})
             for name in ("Decision", "NoteSection"):
                 evidence = contract["$defs"][name]["properties"]["evidence"]
@@ -316,6 +319,11 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
                       "Exact published URLs are checked against the complete archive before admission. "
                       "The supplied scope reports retrieval size; do not claim to have read omitted archives. "
                       "Use the supplied prior prose for material-update checks and retain every source-evidence gate.")
+        if issubclass(result_type, ReviewBatch):
+            prompt += ("\nOUTPUT CONTRACT: duplicate_of can reference only a candidate ID in this current batch, "
+                       "or be null. For a duplicate of a previouslyPublished or earlier-batch story, "
+                       "hold or reject the candidate with duplicate_of null and explain the prior reference "
+                       "in reason. Do not put an archive ID, URL, title or hash in duplicate_of.")
         if result_type is EditionSelection:
             prompt += ("\nOUTPUT FORMAT: Return selected_ids with at most 28 unique shortlist IDs, "
                        "plus a reasons object containing an editorial reason for EVERY shortlist ID, selected or excluded. "
@@ -439,7 +447,8 @@ def validate_decisions(reviewed, packets):
         packet = known[decision.id]
         refs = {c["id"] for c in packet["chunks"]}
         if decision.duplicate_of and decision.duplicate_of not in known:
-            raise ValueError("Unknown duplicate reference")
+            raise ValueError(f"Unknown duplicate reference {decision.duplicate_of}; valid current-batch IDs={sorted(known)}. "
+                             "For historical or other-batch duplicates, hold/reject with duplicate_of null and explain the prior in reason.")
         if not set(decision.evidence).issubset(refs) or any(not set(s.evidence).issubset(refs) for s in decision.sections):
             raise ValueError(f"Invalid evidence reference for {decision.id}; use only individual chunk IDs: {sorted(refs)}")
         if decision.decision == "admit":

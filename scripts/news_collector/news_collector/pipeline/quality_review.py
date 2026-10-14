@@ -272,6 +272,8 @@ def prune_optional_audit_failures(root, review, history, checklist, request, rep
                 "review": {"stories": [story.model_dump(mode="json") for story in kept],
                            "coverage": [item.model_dump(mode="json") for item in coverage]}}
     result = validate_audit(envelope, updated)
+    atomic_json(output / f"audit-record-{updated['requestHash']}.json",
+                {"request": updated, "response": envelope})
     original.clear()
     original.update(review)
     atomic_json(output / "quality-review-request.json", updated)
@@ -284,6 +286,29 @@ def prune_optional_audit_failures(root, review, history, checklist, request, rep
         original["finalAudit"] = review["finalAudit"]
         atomic_json(output / "latest.json", review)
     return result
+
+
+def archived_story_checks(output, request, reused, zone):
+    # A later accidental approval must not erase an earlier unchanged hold.
+    # Archives are immutable request/response pairs, validated before use.
+    # Ignore unrelated, expired or malformed records, never today's findings.
+    choices = {story.id: story for story in reused}
+    for record_path in sorted(output.glob("audit-record-*.json")):
+        if datetime.now(timezone.utc).timestamp() - record_path.stat().st_mtime > 24 * 3600:
+            continue
+        try:
+            record = json.loads(record_path.read_text())
+            archived = validate_audit(record["response"], record["request"])
+            checks = reusable_story_checks(record["request"], request, archived, zone)
+        except (ValueError, KeyError, TypeError) as exc:
+            print(f"Ignoring unusable archived audit: {str(exc)[:200]}", flush=True)
+            continue
+        for story in checks:
+            blocked = any(issue.startswith(f"{story.id}:") for issue in archived.blockers)
+            current = choices.get(story.id)
+            if current is None or blocked or story.verdict != "pass":
+                choices[story.id] = story
+    return list(choices.values())
 
 
 def run_quality_review(root, review, checklist_file=None, audit_file=None, _repair_attempt=0,
@@ -306,7 +331,7 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
     response_path = output / "quality-review-response.json"
     if _previous_audit:
         previous_request, previous_report = _previous_audit
-        reused = reusable_story_checks(previous_request, request, previous_report)
+        reused = reusable_story_checks(previous_request, request, previous_report, profile["timezone"])
     elif not audit_file and previous_path.exists() and response_path.exists():
         previous_request = json.loads(previous_path.read_text())
         previous_response = json.loads(response_path.read_text())
@@ -329,8 +354,9 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
                 if pruned_report and pruned_report.status == "passed":
                     return pruned_report
                 request = audit_request(review, history, checklist)
-                reused = reusable_story_checks(previous_request, request, previous_report)
+                reused = reusable_story_checks(previous_request, request, previous_report, profile["timezone"])
     if not audit_file:
+        reused = archived_story_checks(output, request, reused, profile["timezone"])
         review.pop("finalAudit", None)
         atomic_json(output / "latest.json", review)
     atomic_json(output / "quality-review-request.json", request)
@@ -345,6 +371,8 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
                     "reviewedAt": datetime.now(timezone.utc).isoformat(), "review": result.model_dump(mode="json")}
     atomic_json(output / "quality-review-response.json", envelope)
     report = validate_audit(envelope, request)
+    atomic_json(output / f"audit-record-{request['requestHash']}.json",
+                {"request": request, "response": envelope})
     payload = report.model_dump(mode="json")
     atomic_json(output / "quality-audit.json", payload)
     atomic_json(root / "data/quality/history" / f"{date}-{request['requestHash']}.json", payload)

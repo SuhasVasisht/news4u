@@ -1,5 +1,7 @@
 """Bounded corrections and reuse of unchanged, evidence-bound factual checks."""
 from copy import deepcopy
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import re
 from markdown_it import MarkdownIt
 from pydantic import BaseModel, ConfigDict
@@ -76,24 +78,29 @@ def prunable_optional_ids(report, checklist):
     return sorted(failed - protected)
 
 
-def reusable_story_checks(previous_request, request, report):
-    # Discovery changes require fresh coverage reconciliation, not new checks of
-    # identical published claims. Only removal is safe across selection changes: it cannot add claims or
-    # duplicate events. Coverage is reconciled again against the reduced edition.
-    for key in ("policy", "cutoff", "history"):
+def reusable_story_checks(previous_request, request, report, zone="America/Los_Angeles"):
+    # A retry's clock and unrelated selections are not new evidence. Preserve
+    # both approvals AND holds for the same source/prose/history in this edition.
+    # Changed copy or evidence must be audited again; coverage is always reconciled.
+    for key in ("policy", "history"):
         if previous_request.get(key) != request.get(key):
             return []
+    try:
+        before_cutoff = datetime.fromisoformat(previous_request["cutoff"])
+        after_cutoff = datetime.fromisoformat(request["cutoff"])
+        if (before_cutoff.tzinfo is None or after_cutoff.tzinfo is None
+                or before_cutoff.astimezone(ZoneInfo(zone)).date() != after_cutoff.astimezone(ZoneInfo(zone)).date()
+                or not timedelta(0) <= after_cutoff - before_cutoff <= timedelta(hours=6)):
+            return []
+    except (KeyError, TypeError, ValueError):
+        return []
     if not isinstance(request.get("selection"), dict) or not isinstance(request.get("packets"), list):
         return []
-    before_ids = set(previous_request["selection"]["selected_ids"])
     after_ids = set(request["selection"]["selected_ids"])
-    if not after_ids <= before_ids:
-        return []
     before_packets = {p["id"]: p for p in previous_request["packets"]}
-    if any(p != before_packets.get(p["id"]) for p in request["packets"]):
-        return []
+    after_packets = {p["id"]: p for p in request["packets"]}
     before = {decision["id"]: decision for decision in previous_request["decisions"]}
     after = {decision["id"]: decision for decision in request["decisions"]}
     return [deepcopy(story) for story in report.review.stories
-            if story.id in after_ids and story.verdict == "pass" and before.get(story.id) == after.get(story.id)
-            and not any(blocker.startswith(f"{story.id}:") for blocker in report.blockers)]
+            if story.id in after_ids and before.get(story.id) == after.get(story.id)
+            and before_packets.get(story.id) == after_packets.get(story.id)]

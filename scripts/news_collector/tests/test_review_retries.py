@@ -289,3 +289,24 @@ def test_large_archive_is_bounded_before_cli_without_mutating_authoritative_inpu
     prompt = tmp_path / 'prompt.md';prompt.write_text('Review')
     assert editorial.codex_review(payload, prompt, tmp_path).decisions
     assert payload == original
+
+
+def test_historical_sports_duplicate_has_a_schema_valid_non_admission_path(tmp_path, monkeypatch):
+    from news_collector.jobs.sports import SportsReview
+    monkeypatch.setattr(editorial.shutil, 'which', lambda _: '/bin/codex')
+    def run(command, **kwargs):
+        schema = json.loads(editorial.Path(command[command.index('--output-schema') + 1]).read_text())
+        duplicate = schema['$defs']['Decision']['properties']['duplicate_of']['anyOf']
+        assert duplicate == [{'type': 'string', 'enum': [packet()['id']]}, {'type': 'null'}]
+        assert 'historical' not in duplicate[0]['enum']
+        assert 'hold or reject' in kwargs['input'] and 'duplicate_of null' in kwargs['input']
+        item = decision(decision='hold', duplicate_of=None, reason='The same event was published as historical; no new development.')
+        editorial.Path(command[command.index('-o') + 1]).write_text(SportsReview(decisions=[item]).model_dump_json())
+        return SimpleNamespace(returncode=0, stderr='')
+    monkeypatch.setattr(editorial.subprocess, 'run', run)
+    prompt = tmp_path / 'sports.md'
+    prompt.write_text('Review sports against the published history')
+    result = editorial.codex_review({'packets': [packet()], 'previouslyPublished': [{'id': 'historical'}]},
+                                    prompt, tmp_path, SportsReview)
+    assert result.decisions[0].decision == 'hold'
+    assert result.decisions[0].duplicate_of is None
