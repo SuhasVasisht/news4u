@@ -152,6 +152,15 @@ def run_batched_audit(request, prompt, output, reused, batch_size=5):
                  story.event_key for story in all_story_reviews if story.id == key)}
             for key in request["selection"]["selected_ids"]
         ],
+        # Coverage must see the independent novelty verdict, not just prose that
+        # happens to match an event. A repeated mandatory event can be accounted
+        # for by its published history without forcing that held story into print.
+        "storyAuditFindings": [
+            {key: story.model_dump(mode="json")[key] for key in
+             ("id", "verdict", "reason", "event_key", "priorStoryIds",
+              "materialUpdate", "materialUpdateEvidence")}
+            for story in all_story_reviews
+        ],
         "checklist": request["checklist"],
         "history": coverage_history,
         "candidate_index": coverage_candidates,
@@ -159,6 +168,14 @@ def run_batched_audit(request, prompt, output, reused, batch_size=5):
     }
     print(f"Final coverage audit: {len(request['checklist']['events']) if request['checklist'] else 0} independently discovered events", flush=True)
     def validate_coverage(result):
+        repeats = {story.id for story in all_story_reviews
+                   if story.priorStoryIds and not (story.materialUpdate
+                       and len(story.materialUpdate.strip()) >= 20 and story.materialUpdateEvidence)}
+        if any(item.status == "covered" and repeats.intersection(item.story_ids)
+               for item in result.coverage):
+            raise ValueError("Coverage cannot count a repeat without a material update as fresh coverage. "
+                             "Reconcile the event against published history: use previously_published only "
+                             "for the same event with known prior IDs; otherwise record a missing event.")
         validate_audit({"requestHash": request["requestHash"], "reviewer": "coverage-contract-check",
             "reviewedAt": datetime.now(timezone.utc).isoformat(),
             "review": {"stories": [s.model_dump(mode="json") for s in all_story_reviews],

@@ -17,6 +17,17 @@ provided for event identification. Do not confuse merely related earlier coverag
 with the same event, or use prior coverage to suppress a genuinely new development.
 Do not label a missing mandatory event out of scope to evade the requirement.
 
+Read storyAuditFindings before mapping coverage. Those independent factual and
+novelty findings are authoritative inputs to this reconciliation. A story with
+priorStoryIds and no evidence-backed material update is a repeated event, even
+when discovery marked it mustCover and its summary matches the checklist. Never
+count that repeated story as fresh covered copy. Compare the checklist event to
+the cited historical account: if it is the same event with no material development,
+return not_applicable / previously_published with those known prior_story_ids.
+This accounts for an already-published mandatory event and permits removing its
+held duplicate. If the checklist describes a genuinely new development not yet
+covered, report missing instead; the mandatory gate must remain blocked.
+
 Use the candidate index to distinguish an article never discovered from an excluded,
 unavailable or unselected article. Reviewed candidates and relevant pre-review
 exclusions remain present. Irrelevant old, disabled and promotional rows are omitted
