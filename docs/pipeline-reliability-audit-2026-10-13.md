@@ -33,15 +33,51 @@ real timer-jitter cases. The earlier assurance was therefore too broad.
 | Malformed or contract-invalid news caches aborted the run | Regenerate only invalid cached work through normal bounded review | Invalid JSON, unknown evidence/selection IDs, and audit citation cases; valid factual holds remain blocked and cached |
 | Short complete publisher articles were mislabeled as feed excerpts | Track controlled acquisition provenance, skip redundant refetch, and bind the corrected basis into source hashes | Complete 300/393-word publisher articles versus ordinary feed excerpts; explicit/legacy provenance; evidence gates unchanged |
 | Scheduler jitter skipped valid hourly recovery; three failures abandoned the day | A 55-minute cooldown tolerates hourly jitter; sixteen starts match the configured 07:05–22:05 recovery slots; health distinguishes waiting, blocked and failed | Actual timer timestamps reproduced; afternoon retry allowed after morning failures; next-day/revision resets and final cap remain enforced |
+| Sports summaries lacked the independent factual audit used for news | Add a selected-sports factual gate against complete publisher evidence, bounded correction and re-audit, with export bound to the audited prose | Live review caught a halftime 4–0 score presented as final despite five scorers; publisher evidence and a second same-day report establish 5–0 |
 
 ## Validation and boundaries
 
 Code fixes are in `145aa91`, with filesystem-independent test selection in
-`a3411fa` and consistent government root/subdomain handling in `eee3f4a`.
-Ubuntu validation passed 390 collector tests, 59 application tests and lint.
-The complete no-upload VM rehearsal and publication results are recorded below
-when finished. Runtime logs, source artifacts, databases, credentials and private
-proof are excluded from Git.
+`a3411fa`, consistent government root/subdomain handling in `eee3f4a`, complete
+acquisition-provenance/policy hashing in `04d8c45`, and the sports factual gate in
+`781a614`. Both local and Ubuntu validation passed **417 collector tests, 59
+application tests and lint**.
+
+The full isolated no-upload VM run passed fresh collection, live source research,
+Luna editorial review, factual/coverage audits, sports, export, build and browser
+verification at 18:39 Pacific. Production was mounted read-only during that run.
+After a private runtime backup, production replay passed and the normal native
+daily service published October 13 at 18:45. Restoring the persistent timer caused
+an unattended Git pull and successful same-day no-op at 18:45:47.
+
+Live browser review then exposed the sports score error. The new independent gate
+was exercised against the exact saved erroneous draft using Luna: it held three
+stories, a single bounded repair removed the incorrect England score, and a second
+audit approved that correction. One other sports story remained held and was
+excluded. Repeating this through the complete isolated revision pipeline reused
+the same held finding, cached repair and corrected approval; it did not ask for a
+lucky pass. Fresh collection and all later stages passed at 18:57:26. Production
+no-upload replay passed at 18:59:08.
+
+The revised edition contains **20 news and 7 sports stories**, all with verified
+images. The final news audit has zero unresolved findings, duplicate event groups
+or promotional stories, and covers its mandatory IMF event. Seven selected sports
+stories have independent factual approval. Nine optional discovery omissions are
+recorded rather than presented as covered. AP remains inaccessible; collection
+also records a YouTube RSS failure and a Guardian public RSS fallback. These
+source limitations do not bypass coverage or factual gates.
+
+The documented VM revision process resumed the validated checkpoint, uploaded the
+release and verified Pages plus the custom domain, exiting 0 at **19:01:24 PDT**.
+Hosted verification confirmed 27 reports, 27 images, preserved archives and zero
+browser errors. Independent browser review confirmed the corrected sports story
+and the archive retaining the original October 13 version. The timer is enabled
+and active; Wednesday October 14 starts at **07:05 PDT / 14:05 UTC**, with hourly
+recovery slots through 22:05.
+
+No generated story was hand-edited and no quality gate was bypassed. Runtime
+logs, source artifacts, databases, credentials and private proof remain excluded
+from Git. Private timestamped logs retain the existing automatic 30-day rotation.
 
 Source freshness, promotion exclusions, publisher caps, required coverage,
 independent factual/novelty audits, exact audited selection, same-day gates and
