@@ -206,7 +206,8 @@ def test_invalid_news_cache_regenerates_only_failed_work(tmp_path, monkeypatch, 
     editorial.run_editorial(repository, settings, config)
     output = tmp_path / "data/editorial"
     if damage.startswith("candidate"):
-        cache = next(output.glob("review-*.json"))
+        cache = next(path for path in output.glob("review-*.json")
+                     if len(path.stem.removeprefix("review-")) == 64)
         cache.write_text("{" if damage == "candidate_json" else ReviewBatch(
             decisions=[decision(evidence=["unknown-source-chunk"])]).model_dump_json())
     else:
