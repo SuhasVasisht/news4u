@@ -87,6 +87,8 @@ def review_fixture(tmp_path, monkeypatch, number=1):
     request["requestHash"] = sports.fingerprint(request)
     decisions = [{"id": p["id"], "decision": "admit", "quality": 80, "importance": 60, "kind": "reporting", "reason": "Supported", "headline": ["Quarterback returns from injury", "Franchise sale wins approval", "Championship winner announced"][i], "summary": "A concise supported report.", "points": [], "sections": [], "caveats": [], "evidence": ["p1"], "duplicate_of": None} for i, p in enumerate(packets)]
     review = {"requestHash": request["requestHash"], "reviewer": "Test desk", "reviewedAt": NOW.isoformat(), "decisions": decisions, "selection": {"selected_ids": [p["id"] for p in packets], "excluded": []}}
+    from sports_fact_fixtures import attach_test_proof
+    attach_test_proof(request, review, NOW)
     return settings, request, review
 
 
@@ -117,7 +119,7 @@ def test_attach_rejects_yesterdays_sports_and_duplicate_main_report():
     with pytest.raises(ValueError, match="stale"):
         sports.attach_sports(edition, data, NOW)
     data.update(date=edition["date"], stories=[{"id": "one"}])
-    with pytest.raises(ValueError, match="duplicates"):
+    with pytest.raises(ValueError, match="factual audit"):
         sports.attach_sports(edition, data, NOW)
 
 
@@ -147,9 +149,12 @@ def test_authorized_carryover_requires_visible_label_and_source_date(tmp_path, m
     request["packets"][0]["publishedAt"] = "2026-09-08T20:00:00-07:00"
     request["requestHash"] = sports.fingerprint({k: v for k, v in request.items() if k != "requestHash"})
     review["requestHash"] = request["requestHash"]
+    from sports_fact_fixtures import attach_test_proof
+    attach_test_proof(request, review, NOW)
     with pytest.raises(ValueError, match="explicit reader label"):
         sports.publish_sports(request, review, settings, None, NOW, "America/Los_Angeles")
     review["decisions"][0]["summary"] = "From yesterday's late edition: A concise supported report."
+    attach_test_proof(request, review, NOW)
     result = sports.publish_sports(request, review, settings, None, NOW, "America/Los_Angeles")
     assert result["stories"][0]["publishedAt"] == "2026-09-08T20:00:00-07:00"
 

@@ -244,13 +244,18 @@ def publish_sports(request, review, settings, repository, now, zone):
     from news_collector.jobs.export_edition import publisher
     history = validate_sports_request(request, settings, now, zone)
     today = now.astimezone(ZoneInfo(zone)).date().isoformat()
-    reviewed = validate_external_review(review, request["requestHash"], request["packets"], now)
+    reviewed = validate_external_review({key: value for key, value in review.items() if key != "factualAudit"},
+                                        request["requestHash"], request["packets"], now)
     decisions = {d.id: d for d in reviewed.decisions}
     admitted = {d.id for d in reviewed.decisions if d.decision == "admit"}
     selected = reviewed.selection.selected_ids
     accounted = selected + [d.id for d in reviewed.selection.excluded]
     if len(accounted) != len(set(accounted)) or set(accounted) != admitted:
         raise ValueError("Sports selection must account for admissions once")
+    from .sports_facts import factual_request, verify_factual_proof
+    if selected:
+        verify_factual_proof(review.get("factualAudit"), now,
+                             expected=factual_request(request, reviewed.decisions, selected))
     packets = {p["id"]: p for p in request["packets"]}
     stories, counts = [], Counter()
     for id in selected:
@@ -278,12 +283,18 @@ def publish_sports(request, review, settings, repository, now, zone):
         sources.append({**source, "reviewed": sum(d.quality > 0 and packets[d.id]["source"] == source["name"] for d in reviewed.decisions),
                         "published": sum(source["name"] in s["collectors"] for s in stories)})
     return {"date": today, "generatedAt": now.isoformat(), "requestHash": request["requestHash"],
-            "reviewedAt": reviewed.reviewedAt.isoformat(), "stories": stories, "sports": request["scores"], "sources": sources}
+            "reviewedAt": reviewed.reviewedAt.isoformat(), "stories": stories, "sports": request["scores"], "sources": sources,
+            "factualAudit": review.get("factualAudit")}
 
 
 def attach_sports(snapshot, sports, now):
     if sports["date"] != snapshot["date"] or not timedelta(0) <= now - parse_datetime(sports["sports"]["checkedAt"]) <= timedelta(hours=24):
         raise ValueError("Sports snapshot is stale; run the sports pipeline for today's paper")
+    if sports["stories"]:
+        from .sports_facts import verify_factual_proof
+        verify_factual_proof(sports.get("factualAudit"), now, stories=sports["stories"])
+        if sports["factualAudit"]["input"]["sourceRequestHash"] != sports["requestHash"]:
+            raise ValueError("Sports factual audit does not match the exported source request")
     existing = {s["id"] for s in snapshot["stories"]}
     if any(s["id"] in existing for s in sports["stories"]):
         raise ValueError("Sports article duplicates main paper")

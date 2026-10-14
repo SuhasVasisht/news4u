@@ -7,8 +7,10 @@ from pydantic import BaseModel, ConfigDict
 from datetime import datetime, timezone
 
 from news_collector.runtime import build_runtime
-from news_collector.pipeline.editorial import codex_review, ReviewBatch, validate_decisions, reader_profile, EditionSelection, validate_selection
+from news_collector.pipeline.editorial import codex_review, ReviewBatch, Decision, validate_decisions, reader_profile, EditionSelection, validate_selection
 from news_collector.pipeline.sports import LIMITS, prepare_sports, publish_sports, write_json, config_for, fingerprint, validate_sports_request, overlapping_sports_prose
+from news_collector.pipeline.sports_facts import PROMPT as FACTUAL_PROMPT, factual_request, validate_factual_checks, factual_proof, verify_factual_proof
+from news_collector.pipeline.edition_audit import StoryAuditReview
 
 
 class SportsReview(ReviewBatch):
@@ -195,6 +197,72 @@ def reconcile_sports_events(request, decisions, prompt, output, history_root=Non
     selection["excluded"].extend(repeats)
     return selection
 
+
+def audit_selected_sports(request, decisions, selection, output, history_root=None):
+    """Audit selected prose, attempt one copy-edit, then re-audit changed evidence."""
+    from news_collector.pipeline.quality_review import cached_audit
+    from news_collector.pipeline.audit_repair import ProseCorrections, apply_corrections
+    from news_collector.pipeline.editorial import load_validated_cache
+    selected = list(selection["selected_ids"])
+    if not selected:
+        return decisions, selection, None
+    def audit(current):
+        checks = []
+        for offset in range(0, len(selected), REVIEW_BATCH_SIZE):
+            ids = selected[offset:offset + REVIEW_BATCH_SIZE]
+            payload = factual_request(request, current, ids)
+            print(f"Independent sports factual audit: {len(ids)} stories", flush=True)
+            result = cached_audit(payload, FACTUAL_PROMPT, output, StoryAuditReview,
+                                  lambda result: validate_factual_checks(result, payload))
+            checks.extend(result.stories)
+        result = StoryAuditReview(stories=checks)
+        payload = factual_request(request, current, selected)
+        return payload, result, validate_factual_checks(result, payload)
+    payload, checks, held = audit(decisions)
+    if held:
+        print(f"Sports factual audit held {len(held)} stories; attempting one bounded copy-edit", flush=True)
+        packets = [packet for packet in request["packets"] if packet["id"] in held]
+        before = {decision.id: decision.model_dump(mode="json") for decision in decisions}
+        repair = {"packets": packets, "decisions": [before[key] for key in held],
+                  "findings": [story.model_dump(mode="json") for story in checks.stories if story.id in held],
+                  "sportsConstraints": {"maximumSummaryWords": 95, "maximumPoints": 2, "sections": []}}
+        prompt = FACTUAL_PROMPT.with_name("audit-repair-prompt.md")
+        cache = output / f"factual-repair-{fingerprint({'input': repair, 'prompt': prompt.read_text(), 'model': os.environ.get('NEWS_EDITOR_MODEL', 'default'), 'effort': os.environ.get('NEWS_EDITOR_REASONING_EFFORT', 'default')})}.json"
+        def validate(result):
+            corrected = apply_corrections(before, result, packets)
+            if any(len(decision.summary.split()) > 95 or len(decision.points) > 2 or decision.sections
+                   for decision in corrected.decisions):
+                raise ValueError("Sports factual copy-edit exceeds the sports section or length budget")
+            return corrected
+        corrections = load_validated_cache(cache, ProseCorrections, validate)
+        if corrections is None:
+            corrections = codex_review(repair, prompt, output, ProseCorrections, validate_result=validate)
+            validate(corrections)
+            write_json(cache, corrections.model_dump(mode="json"))
+        corrected = {decision.id: decision for decision in apply_corrections(before, corrections, packets).decisions}
+        decisions = [corrected.get(decision.id, decision) for decision in decisions]
+        payload, checks, held = audit(decisions)
+    selected = [key for key in selected if key not in held]
+    excluded = [*selection["excluded"], *[{"id": key, "reason": "Held by independent sports factual audit after bounded repair"} for key in held]]
+    # Copy-editing can change overlap/novelty. Apply the same final export and
+    # history contracts again before binding the approved prose.
+    packets = {packet["id"]: packet for packet in request["packets"]}
+    final = select_sports([decision for decision in decisions if decision.id in selected], packets)
+    selected = final["selected_ids"]
+    excluded.extend(final["excluded"])
+    repeats, _ = review_sports_novelty(request, [decision for decision in decisions if decision.id in selected], output, history_root)
+    repeated = {item["id"] for item in repeats}
+    selected = [key for key in selected if key not in repeated]
+    excluded.extend(repeats)
+    if not selected:
+        raise ValueError("Independent sports factual review left no publishable selected stories")
+    payload = factual_request(request, decisions, selected)
+    final_checks = StoryAuditReview(stories=[story for story in checks.stories if story.id in selected])
+    proof = factual_proof(payload, final_checks)
+    verify_factual_proof(proof, datetime.now(timezone.utc), expected=payload)
+    write_json(output / "factual-audit-latest.json", proof)
+    return decisions, {"selected_ids": selected, "excluded": excluded}, proof
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--prepare-review", action="store_true")
@@ -229,6 +297,12 @@ def main():
         review = {"requestHash": request["requestHash"], "reviewer": "Sports editorial desk", "reviewedAt": datetime.now(timezone.utc).isoformat(),
                   "decisions": [d.model_dump() for d in result.decisions], "selection": reconcile_sports_events(request, result.decisions,
                      settings.project_root / "config/sports-event-selection-prompt.md", output, settings.project_root.parent.parent)}
+    decisions = [Decision.model_validate(item) for item in review["decisions"]]
+    decisions, selection, proof = audit_selected_sports(request, decisions, review["selection"], output,
+                                                       settings.project_root.parent.parent)
+    review["decisions"] = [decision.model_dump(mode="json") for decision in decisions]
+    review["selection"] = selection
+    review["factualAudit"] = proof
     write_json(output / "review-response.json", review)
     snapshot = publish_sports(request, review, settings, repository, datetime.now(timezone.utc), zone)
     write_json(output / "latest.json", snapshot)

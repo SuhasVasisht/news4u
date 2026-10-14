@@ -272,6 +272,14 @@ keeps genuinely distinct developments involving the same player or club. League
 limits are enforced afterwards. This avoids relying solely on similar headlines;
 the existing evidence and source/date validations still apply to published prose.
 
+Selected sports narratives also pass an independent factual audit against their
+complete publisher evidence. It distinguishes halftime, final and aggregate scores
+and checks every published block. One bounded copy-edit is re-audited; unchanged
+held copy retains its cached hold. Export requires the exact audited source,
+selection and prose. Invalid cached audit output is regenerated, while valid
+factual holds remain blocked. If every selected narrative is held, the run fails
+visibly rather than treating an empty repair as success.
+
 To repair an already-published current edition, use the same guarded pipeline:
 `npm run publish:daily -- --revise-today --no-upload`, inspect the rehearsal, then
 `npm run publish:daily -- --revise-today`. The second command resumes validated

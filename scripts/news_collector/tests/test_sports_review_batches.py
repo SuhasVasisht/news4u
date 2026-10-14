@@ -166,5 +166,7 @@ def test_model_selected_overlaps_are_resolved_before_publication_and_cache_resum
     assert sports.reconcile_sports_events(request, decisions, prompt, tmp_path) == selection
     assert len(calls) == 1
     response["selection"] = selection
+    from sports_fact_fixtures import attach_test_proof
+    attach_test_proof(request, response, NOW)
     result = sports_pipeline.publish_sports(request, response, settings, None, NOW, "America/Los_Angeles")
     assert [story["id"] for story in result["stories"]] == ["0"]
