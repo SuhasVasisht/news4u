@@ -72,9 +72,10 @@ def prunable_optional_ids(report, checklist):
     must_cover = {event["id"] for event in checklist["events"] if event["mustCover"]}
     protected = set().union(*(failed.intersection(item.story_ids)
                               for item in report.review.coverage
-                              if item.event_id in must_cover), set())
-    # Optional mapped stories may be removed; quality_review will run a fresh
-    # coverage reconciliation instead of reusing the now-stale mapping.
+                              if item.event_id in must_cover
+                              and not (set(item.story_ids) - failed)), set())
+    # A mandatory mapping with another passed account can be reconsidered after
+    # removal, but only a fresh independent coverage check can approve the subset.
     return sorted(failed - protected)
 
 

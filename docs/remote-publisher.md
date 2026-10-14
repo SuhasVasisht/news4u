@@ -440,3 +440,16 @@ bound into their source hashes so an old incorrectly labeled approval cannot
 silently resume. Ordinary feed excerpts retain their label when extraction fails.
 Word-count, evidence, quality and truncation gates remain unchanged. Publisher
 identity aliases are included in source-verification cache policy identity.
+
+Final coverage reconciliation receives story-level novelty findings. A required
+event already covered in a prior edition can be accounted for through that known
+history; a held repeat cannot count as fresh coverage without a material update.
+If a failed companion is removed from a mandatory mapping, an independent
+coverage-only check must approve the retained selection. Facts are not reviewed
+again merely to obtain another verdict. Unchanged same-edition findings retain
+their holds across fresh cutoffs and unrelated selection changes; validated audit
+pairs preserve them even when a shared latest file is corrupt. Changed prose,
+evidence, policy, history or edition date requires review again. Unusable shared
+audit JSON is discarded as an optimization, without discarding valid archived
+findings. Mandatory corroboration requires two fresh independent publishers or
+fresh authoritative evidence; algorithm changes invalidate old source proof.

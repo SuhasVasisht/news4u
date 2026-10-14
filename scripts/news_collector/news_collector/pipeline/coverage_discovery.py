@@ -95,7 +95,7 @@ def verify_must_cover_sources(payload, cutoff, cache=None):
                     normalized.append({**source, "url": final_url, "publishedAt": actual.isoformat()})
             fresh = [(date, host, identity) for date, host, identity in verified if date >= cutoff - timedelta(hours=48)]
             primary = any(authoritative_host(host) for _, host, _ in fresh)
-            if not fresh or not (primary or len({identity for _, _, identity in verified}) >= 2):
+            if not fresh or not (primary or len({identity for _, _, identity in fresh}) >= 2):
                 failures.append(f"Must-cover event {event['id']} lacks accessible publisher-dated evidence of a new development. "
                                 "Replace unavailable/undated sources or correct claimed dates using publisher metadata: "
                                 + json.dumps(diagnostics))
@@ -115,7 +115,7 @@ def discover_coverage(output, cutoff, profile, checklist_file=None):
     output = Path(output)
     prompt_path = Path(__file__).resolve().parents[2] / "config" / "coverage-discovery-prompt.md"
     from .publishers import authority_policy_fingerprint
-    context = {"sourceVerificationVersion": 3, "authorityPolicy": authority_policy_fingerprint(),
+    context = {"sourceVerificationVersion": 4, "authorityPolicy": authority_policy_fingerprint(),
                "profile": profile, "prompt": prompt_path.read_text(),
                "model": os.environ.get("NEWS_EDITOR_MODEL", "default"),
                "effort": os.environ.get("NEWS_EDITOR_REASONING_EFFORT", "default")}

@@ -40,7 +40,7 @@ def test_verified_primary_source_passes_and_network_results_are_cached(monkeypat
     assert len(calls) == 1
 
 
-def test_corrobation_requires_independent_domains_and_one_fresh_article(monkeypatch):
+def test_corroboration_requires_independent_publishers_with_fresh_articles(monkeypatch):
     monkeypatch.setattr(images, 'download', lambda _, url, __: (
         b'<meta property="article:published_time" content="2026-10-07T12:00:00Z">', url))
     monkeypatch.setattr(extract, 'extract_text_from_html', lambda *_: 'verified article ' * 100)
@@ -257,5 +257,51 @@ def test_same_pipeline_repair_reuses_bound_verified_snapshot_but_tampering_requi
     changed = json.loads(target.read_text())
     changed['events'][0]['sources'][0]['url'] = 'https://imf.org/unverified-new-report'
     target.write_text(json.dumps(changed))
+    with pytest.raises(discovery.CoverageVerificationError):
+        discovery.discover_coverage(target, NOW, {}, checklist_file=target)
+
+
+@pytest.mark.parametrize('companion_date', ['2026-10-01T12:00:00Z', '2026-10-07T12:00:00Z'])
+def test_old_independent_background_cannot_corroborate_a_new_mandatory_development(monkeypatch, companion_date):
+    def download(_, url, __):
+        date = companion_date if 'independent.org' in url else '2026-10-07T12:00:00Z'
+        return f'<meta property="article:published_time" content="{date}">'.encode(), url
+    monkeypatch.setattr(images, 'download', download)
+    monkeypatch.setattr(extract, 'extract_text_from_html', lambda *_: 'verified publisher article ' * 100)
+    payload = event('https://publisher.org/new-development')
+    payload['events'][0]['sources'].append({'url': 'https://independent.org/background', 'publishedAt': companion_date})
+    if companion_date.startswith('2026-10-01'):
+        with pytest.raises(discovery.CoverageVerificationError, match='new development'):
+            discovery.verify_must_cover_sources(payload, NOW)
+        assert payload['events'][0]['mustCover'] is True
+    else:
+        assert discovery.verify_must_cover_sources(payload, NOW) == {'outbreak-update'}
+
+
+def test_older_verification_algorithm_proof_requires_fresh_source_verification(tmp_path, monkeypatch):
+    import hashlib
+    import json
+    from news_collector.pipeline import editorial
+    clock = type('Clock', (datetime,), {'now': classmethod(lambda cls, tz=None: NOW)})
+    monkeypatch.setattr(discovery, 'datetime', clock)
+    payload = {'checkedAt': NOW.isoformat(), 'method': 'independent_web_research', 'researcher': 'Independent desk',
+               'scope': ['Economy'], 'queries': ['new report'],
+               'events': [{**event()['events'][0], 'event': 'Major primary institution report', 'sector': 'Economy'}]}
+    payload['events'][0]['sources'][0]['finding'] = 'Publisher evidence confirms a new economic report.'
+    monkeypatch.setattr(images, 'download', lambda _, url, __: (
+        b'<meta property="article:published_time" content="2026-10-07T12:00:00Z">', url))
+    monkeypatch.setattr(extract, 'extract_text_from_html', lambda *_: 'publisher report ' * 100)
+    monkeypatch.setattr(editorial, 'codex_review', lambda *_args, **_kwargs: discovery.IndependentChecklist.model_validate(payload))
+    target = tmp_path / 'checklist.json'
+    discovery.discover_coverage(target, NOW, {})
+    context_path = target.with_suffix('.context.json')
+    context = json.loads(context_path.read_text())
+    context['sourceVerificationVersion'] = 3
+    context_path.write_text(json.dumps(context))
+    proof_path = target.with_suffix('.verified.json')
+    proof = json.loads(proof_path.read_text())
+    proof['contextHash'] = hashlib.sha256(json.dumps(context, sort_keys=True).encode()).hexdigest()
+    proof_path.write_text(json.dumps(proof))
+    monkeypatch.setattr(images, 'download', lambda *_: (_ for _ in ()).throw(ValueError('source unavailable')))
     with pytest.raises(discovery.CoverageVerificationError):
         discovery.discover_coverage(target, NOW, {}, checklist_file=target)

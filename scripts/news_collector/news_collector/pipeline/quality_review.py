@@ -41,6 +41,20 @@ def atomic_json(path, value):
     temporary.replace(path)
 
 
+def saved_audit_json(path):
+    """An unusable optimization must not strand a later edition or resumed run."""
+    if not path.exists():
+        return None
+    try:
+        value = json.loads(path.read_text())
+        if not isinstance(value, dict):
+            raise ValueError("Expected an audit object")
+        return value
+    except (ValueError, TypeError) as exc:
+        print(f"Ignoring unusable saved audit {path.name}: {str(exc)[:200]}", flush=True)
+        return None
+
+
 def cached_audit(payload, prompt, output, result_type, validate):
     identity = {"version": 1, "payload": payload, "prompt": prompt.read_text(),
                 "model": os.environ.get("NEWS_EDITOR_MODEL", "default"),
@@ -257,7 +271,15 @@ def prune_optional_audit_failures(root, review, history, checklist, request, rep
     updated = audit_request(review, history, checklist)
     kept = [story for story in report.review.stories if story.id not in pruned]
     coverage = deepcopy(report.review.coverage)
-    for item in coverage:
+    mandatory = {event["id"] for event in checklist["events"] if event["mustCover"]}
+    recheck = any(item.event_id in mandatory and set(pruned).intersection(item.story_ids)
+                  for item in coverage)
+    if recheck:
+        prompt = Path(__file__).resolve().parents[2] / "config/edition-audit-prompt.md"
+        # Reuse the unchanged factual findings, including any remaining holds.
+        # The narrower selection is new coverage evidence, never a factual retry.
+        coverage = run_batched_audit(updated, prompt, output, kept).coverage
+    for item in coverage if not recheck else []:
         if set(pruned).intersection(item.story_ids):
             # A removed factual hold cannot support coverage, even when another
             # mapped story remains. Record the omission conservatively.
@@ -320,8 +342,9 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
     history = load_history(root, date)
     checklist = discover_coverage(output / "checklist.json", cutoff, profile, checklist_file)
     response_path = output / "quality-review-response.json"
+    previous_response = saved_audit_json(response_path)
     current_hash = audit_request(review, history, checklist)["requestHash"]
-    already_selected = response_path.exists() and json.loads(response_path.read_text()).get("requestHash") == current_hash
+    already_selected = previous_response is not None and previous_response.get("requestHash") == current_hash
     if not audit_file and not already_selected and not _repair_attempt:
         reconsider_announcements(review, history, output, checklist)
     review["selection"] = limit_publishers(review["selection"], review["packets"])
@@ -332,13 +355,12 @@ def run_quality_review(root, review, checklist_file=None, audit_file=None, _repa
     if _previous_audit:
         previous_request, previous_report = _previous_audit
         reused = reusable_story_checks(previous_request, request, previous_report, profile["timezone"])
-    elif not audit_file and previous_path.exists() and response_path.exists():
-        previous_request = json.loads(previous_path.read_text())
-        previous_response = json.loads(response_path.read_text())
+    elif not audit_file and previous_response is not None:
+        previous_request = saved_audit_json(previous_path)
         # An interrupted run can leave a new request beside an older response.
         # Only reuse a response that is bound to both the saved and current request.
-        saved_hash = previous_request.get("requestHash")
-        if previous_response.get("requestHash") == saved_hash:
+        saved_hash = previous_request.get("requestHash") if previous_request else None
+        if previous_request is not None and previous_response.get("requestHash") == saved_hash:
             try:
                 previous_report = validate_audit(previous_response, previous_request)
             except (ValueError, KeyError, TypeError) as exc:
