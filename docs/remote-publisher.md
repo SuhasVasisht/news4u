@@ -236,9 +236,12 @@ restoring capacity. A known reset time clears the block automatically when due;
 unknown resets require explicit recovery. Already-live editions remain no-ops.
 
 
-Retries are limited to three starts per local edition date and code/model revision,
-with at least one hour between starts. The hourly timer can check for a missing
-edition, but cannot repeatedly spend the editor quota on unchanged failures.
+Retries are bounded to sixteen starts per local edition date and code/model
+revision, matching the 07:05–22:05 hourly recovery slots. A 55-minute cooldown
+prevents rapid model loops while tolerating systemd jitter at hourly boundaries.
+The publisher reports cooldown as waiting and exhausted budgets as blocked, with
+attempt counts and an explicit recovery action; quota exhaustion remains a separate
+authenticated-account block.
 `data/publisher-attempts.json` is private runtime state. A new date or fixed code
 revision gets a new budget; `--retry-editor` explicitly resets it after an operator
 resolves a blocking account or configuration problem. A successful no-upload
@@ -402,3 +405,21 @@ serialized checks growing past the deployment deadline as the archive expands.
 An interrupted upload resumes by comparing the exact live manifest and rechecking
 the existing bundle with `--skip-upload`, rather than generating or uploading a
 second edition.
+
+
+Independent coverage authority uses exact public-institution roots/subdomains and
+restricted government suffixes, not a blanket `.org` allowance. IMF and other
+international public institutions are recognized with one publisher identity.
+The complete authority policy is hashed into discovery cache identity. Mandatory
+sources are normalized to the final verified URL and actual publisher timestamp;
+unavailable companions are removed. The final gate and source intake consume
+that same evidence. A checksum-bound verification sidecar lets same-pipeline
+repairs reuse the verified source snapshot; changed checklists or policy require
+verification again. Newly required URLs receive candidate priority and cannot be
+lost solely to ordinary per-source candidate limits. Date, disabled-source,
+promotional and historical-duplicate exclusions still apply.
+
+Sports selection and export use the same deterministic overlap predicate across
+sports groups. Invalid news decision/selection/audit caches are discarded and
+regenerated through bounded normal review. Valid factual holds remain cached and
+blocked; cache recovery cannot be used to repeatedly seek a lucky approval.

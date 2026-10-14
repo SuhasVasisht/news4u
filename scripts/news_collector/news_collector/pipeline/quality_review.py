@@ -11,7 +11,7 @@ from news_collector.pipeline.coverage_discovery import discover_coverage
 from news_collector.pipeline.publishers import publisher, limit_publishers
 from news_collector.pipeline.edition_audit import (AuditReview, CoverageAuditReview,
     StoryAuditReview, build_audit_request, validate_audit, require_publishable)
-from news_collector.pipeline.editorial import codex_review, reader_profile, ReviewBatch, EditionSelection, validate_decisions
+from news_collector.pipeline.editorial import codex_review, reader_profile, ReviewBatch, EditionSelection, validate_decisions, validate_selection, load_validated_cache
 from news_collector.pipeline.publication_history import load_history, history_hash
 from news_collector.utils import canonicalize_url
 from collections import Counter
@@ -47,9 +47,8 @@ def cached_audit(payload, prompt, output, result_type, validate):
                 "effort": os.environ.get("NEWS_EDITOR_REASONING_EFFORT", "default")}
     key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     cache = output / "audit-calls" / f"{key}.json"
-    if cache.exists():
-        result = result_type.model_validate_json(cache.read_text())
-        validate(result)
+    result = load_validated_cache(cache, result_type, validate)
+    if result is not None:
         print("Reusing validated audit call for unchanged evidence", flush=True)
         return result
     result = codex_review(payload, prompt, output, result_type, allow_web=True, validate_result=validate)
@@ -194,7 +193,9 @@ def reconsider_announcements(review, history, output, checklist=None, findings=N
                               + os.environ.get("NEWS_EDITOR_MODEL", "default")).encode()).hexdigest()
         cache = output / f"announcement-{key}.json"
         print(f"Reconsidering announcement evidence: {packet['id']}", flush=True)
-        result = ReviewBatch.model_validate_json(cache.read_text()) if cache.exists() else codex_review(payload, prompt, output)
+        result = load_validated_cache(cache, ReviewBatch, lambda result: validate_decisions(result, [packet]))
+        if result is None:
+            result = codex_review(payload, prompt, output)
         validate_decisions(result, [packet])
         atomic_json(cache, result.model_dump(mode="json"))
         decision = result.decisions[0].model_dump(mode="json")
@@ -215,10 +216,10 @@ def reconsider_announcements(review, history, output, checklist=None, findings=N
                               + os.environ.get("NEWS_EDITOR_MODEL", "default")).encode()).hexdigest()
         cache = output / f"coverage-selection-{key}.json"
         print("Final selection: reconciling admitted stories with independent coverage", flush=True)
-        selection = EditionSelection.model_validate_json(cache.read_text()) if cache.exists() else codex_review(payload, selection_prompt, output, EditionSelection)
-        accounted = selection.selected_ids + [item.id for item in selection.excluded]
-        if len(accounted) != len(set(accounted)) or set(accounted) != {p["id"] for p in shortlist} or len(selection.selected_ids) > 28:
-            raise ValueError("Reconsidered selection must account for every admission once, maximum 28")
+        selection = load_validated_cache(cache, EditionSelection, lambda result: validate_selection(result, shortlist))
+        if selection is None:
+            selection = codex_review(payload, selection_prompt, output, EditionSelection)
+        validate_selection(selection, shortlist)
         atomic_json(cache, selection.model_dump(mode="json"))
         review["selection"] = limit_publishers(selection.model_dump(mode="json"), review["packets"])
 

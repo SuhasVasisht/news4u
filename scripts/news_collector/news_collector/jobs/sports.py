@@ -5,11 +5,10 @@ from pathlib import Path
 from typing import Literal
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime, timezone
-from rapidfuzz import fuzz
 
 from news_collector.runtime import build_runtime
 from news_collector.pipeline.editorial import codex_review, ReviewBatch, validate_decisions, reader_profile, EditionSelection, validate_selection
-from news_collector.pipeline.sports import LIMITS, prepare_sports, publish_sports, write_json, config_for, fingerprint, validate_sports_request
+from news_collector.pipeline.sports import LIMITS, prepare_sports, publish_sports, write_json, config_for, fingerprint, validate_sports_request, overlapping_sports_prose
 
 
 class SportsReview(ReviewBatch):
@@ -20,8 +19,7 @@ REVIEW_BATCH_SIZE = 5
 
 
 def overlapping_story(left, right):
-    return (fuzz.token_set_ratio(left.headline, right.headline) >= 70
-            and fuzz.token_set_ratio(left.summary, right.summary) >= 50)
+    return overlapping_sports_prose(left.headline, left.summary, right.headline, right.summary)
 
 
 def review_candidates(request, prompt, output):
@@ -63,9 +61,8 @@ def select_sports(decisions, packets, *, deduplicate=True):
     selected, excluded, counts, chosen = [], [], {}, []
     for decision in ranked:
         group = packets[decision.id]["sportsGroup"]
-        if deduplicate and any(packets[item.id]["sportsGroup"] == group and overlapping_story(decision, item)
-               for item in chosen):
-            excluded.append({"id": decision.id, "reason": f"Duplicate {group} event already represented by a stronger account"})
+        if deduplicate and any(overlapping_story(decision, item) for item in chosen):
+            excluded.append({"id": decision.id, "reason": "Duplicate sports event already represented by a stronger account"})
             continue
         counts[group] = counts.get(group, 0) + 1
         if counts[group] <= LIMITS[group]:
@@ -187,7 +184,9 @@ def reconcile_sports_events(request, decisions, prompt, output, history_root=Non
         validate_selection(result, shortlist)
     write_json(cache, result.model_dump(mode="json"))
     chosen = set(result.selected_ids)
-    selection = select_sports([decision for decision in decisions if decision.id in chosen], packets, deduplicate=False)
+    # Model-selected IDs still have to satisfy the exact deterministic export
+    # contract. Resolve overlaps here instead of caching a guaranteed failure.
+    selection = select_sports([decision for decision in decisions if decision.id in chosen], packets)
     selection["excluded"].extend(item.model_dump(mode="json") for item in result.excluded)
     repeats, _ = review_sports_novelty(request,
         [decision for decision in decisions if decision.id in selection["selected_ids"]], output, history_root)

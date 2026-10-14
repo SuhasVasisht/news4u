@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import json
 import os
+import hashlib
 from pathlib import Path
 import tempfile
 from zoneinfo import ZoneInfo
@@ -70,7 +71,7 @@ def verify_must_cover_sources(payload, cutoff, cache=None):
     failures, verified_ids = [], []
     with httpx.Client(timeout=10, follow_redirects=False, headers={"User-Agent": "News4u coverage verifier"}) as client:
         for event in events:
-            verified, diagnostics = [], []
+            verified, normalized, diagnostics = [], [], []
             for source in event["sources"]:
                 url = source["url"]
                 if url not in cache:
@@ -91,6 +92,7 @@ def verify_must_cover_sources(payload, cutoff, cache=None):
                 if (actual is not None and actual.tzinfo is not None and words >= 80
                         and claimed.date() in {actual.date(), actual.astimezone(timezone.utc).date()} and actual <= cutoff + timedelta(minutes=5)):
                     verified.append((actual, (urlparse(final_url).hostname or "").removeprefix("www."), publisher(final_url)))
+                    normalized.append({**source, "url": final_url, "publishedAt": actual.isoformat()})
             fresh = [(date, host, identity) for date, host, identity in verified if date >= cutoff - timedelta(hours=48)]
             primary = any(authoritative_host(host) for _, host, _ in fresh)
             if not fresh or not (primary or len({identity for _, _, identity in verified}) >= 2):
@@ -98,6 +100,9 @@ def verify_must_cover_sources(payload, cutoff, cache=None):
                                 "Replace unavailable/undated sources or correct claimed dates using publisher metadata: "
                                 + json.dumps(diagnostics))
             else:
+                # The consumer must see the same publisher identities/dates that
+                # passed verification, not redirects or unavailable companions.
+                event["sources"] = list({item["url"]: item for item in normalized}.values())
                 verified_ids.append(event['id'])
                 print(f"Coverage requirement verified: {event['id']} ({len(verified)} dated sources)", flush=True)
     if failures:
@@ -109,20 +114,30 @@ def discover_coverage(output, cutoff, profile, checklist_file=None):
     """Return and persist a validated checklist; errors leave the prior file untouched."""
     output = Path(output)
     prompt_path = Path(__file__).resolve().parents[2] / "config" / "coverage-discovery-prompt.md"
-    context = {"sourceVerificationVersion": 2, "profile": profile, "prompt": prompt_path.read_text(),
+    from .publishers import authority_policy_fingerprint
+    context = {"sourceVerificationVersion": 3, "authorityPolicy": authority_policy_fingerprint(),
+               "profile": profile, "prompt": prompt_path.read_text(),
                "model": os.environ.get("NEWS_EDITOR_MODEL", "default"),
                "effort": os.environ.get("NEWS_EDITOR_REASONING_EFFORT", "default")}
     context_path = output.with_suffix(".context.json")
-    if checklist_file is None and output.exists() and context_path.exists():
+    evidence_path = output.with_suffix(".verified.json")
+    def digest(value):
+        return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+    same_file = checklist_file is None or Path(checklist_file).resolve() == output.resolve()
+    if same_file and output.exists() and context_path.exists() and evidence_path.exists():
         try:
-            if json.loads(context_path.read_text()) == context:
-                cached = validate_checklist(json.loads(output.read_text()), cutoff, profile)
+            raw = json.loads(output.read_text())
+            evidence = json.loads(evidence_path.read_text())
+            if (json.loads(context_path.read_text()) == context and evidence.get("contextHash") == digest(context)
+                    and evidence.get("checklistHash") == digest(raw)):
+                cached = validate_checklist(raw, cutoff, profile)
                 print(f"Coverage discovery: reusing {len(cached['events'])} current validated events", flush=True)
                 return cached
         except (ValueError, TypeError):
             pass  # A new day or expired research requires fresh discovery.
     if checklist_file is not None:
         payload = json.loads(Path(checklist_file).read_text())
+        checked_sources = {}
     else:
         from .editorial import codex_review
         research = {"cutoff": cutoff.isoformat(), "profile": profile,
@@ -151,6 +166,8 @@ def discover_coverage(output, cutoff, profile, checklist_file=None):
         payload = result.model_dump(mode="json")
         validate_research(result)
     validated = validate_checklist(payload, cutoff, profile)
+    verify_must_cover_sources(validated, cutoff, checked_sources)
+    validated = validate_checklist(validated, cutoff, profile)
     print(f"Coverage discovery complete: {len(validated['events'])} events, "
           f"{sum(event['mustCover'] for event in validated['events'])} mandatory", flush=True)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -169,4 +186,6 @@ def discover_coverage(output, cutoff, profile, checklist_file=None):
     finally:
         temporary.unlink(missing_ok=True)
     context_path.write_text(json.dumps(context, sort_keys=True))
+    evidence_path.write_text(json.dumps({"contextHash": digest(context), "checklistHash": digest(validated),
+                                         "verifiedAt": datetime.now(timezone.utc).isoformat()}, sort_keys=True))
     return validated

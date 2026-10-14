@@ -71,6 +71,25 @@ def test_podcast_budget_does_not_expand_when_categories_change(tmp_path, monkeyp
     assert prepared["pending"] == 1
 
 
+def test_new_required_article_cannot_be_crowded_out_by_older_research_rows(tmp_path, monkeypatch):
+    current = datetime.now(timezone.utc).isoformat()
+    required = 'https://example.com/new-mandatory-event'
+    rows = [row(source='coverage_research', category='world', importance_score=1,
+                canonical_url=f'https://example.com/old-{i}', published_at=current) for i in range(30)]
+    rows.append(row(source='coverage_research', category='world', importance_score=0,
+                    canonical_url=required, published_at=current))
+    repository = SimpleNamespace(fetch_recent_items=lambda **_kwargs: rows)
+    settings = SimpleNamespace(project_root=tmp_path / 'scripts/news_collector', user_agent='Test')
+    monkeypatch.setattr(editorial, 'content_packet', lambda r, *_: {
+        **packet(), 'id': r['canonical_url'].rsplit('/', 1)[-1], 'url': r['canonical_url'], 'source': r['source']})
+    editorial.run_editorial(repository, settings,
+        {'collectors': [{'name': 'coverage_research', 'editorial_limit': 30}]},
+        prepare_only=True, required_urls={required})
+    request = json.loads((tmp_path / 'data/editorial/review-request.json').read_text())
+    assert len(request['packets']) == 30
+    assert required in {p['url'] for p in request['packets']}
+
+
 def test_already_published_latest_podcast_does_not_backfill_an_older_episode(tmp_path, monkeypatch):
     current = datetime.now(timezone.utc).isoformat()
     rows = [row(source="lenny", canonical_url=f"https://example.com/{i}", published_at=current,
@@ -167,6 +186,39 @@ def test_external_review_runs_without_calling_cli(tmp_path, monkeypatch):
     result = editorial.run_editorial(repository, settings, config, review_file=path)
     assert result["selection"]["selected_ids"] == ["one"]
     assert result["reviewProvenance"]["mode"] == "review-file"
+
+
+@pytest.mark.parametrize("damage", ["candidate_evidence", "candidate_json", "selection_id"])
+def test_invalid_news_cache_regenerates_only_failed_work(tmp_path, monkeypatch, damage):
+    current = datetime.now(timezone.utc)
+    settings = SimpleNamespace(project_root=tmp_path / "scripts/news_collector", user_agent="Test")
+    repository = SimpleNamespace(fetch_recent_items=lambda **kwargs: [row(published_at=current.isoformat())])
+    monkeypatch.setattr(editorial, "content_packet", lambda *_: packet())
+    calls = []
+    def review(payload, *args):
+        if args[-1] is editorial.EditionSelection:
+            calls.append("selection")
+            return editorial.EditionSelection(selected_ids=["one"], excluded=[])
+        calls.append("candidate")
+        return ReviewBatch(decisions=[decision()])
+    monkeypatch.setattr(editorial, "codex_review", review)
+    config = {"collectors": [{"name": "ars_technica"}]}
+    editorial.run_editorial(repository, settings, config)
+    output = tmp_path / "data/editorial"
+    if damage.startswith("candidate"):
+        cache = next(output.glob("review-*.json"))
+        cache.write_text("{" if damage == "candidate_json" else ReviewBatch(
+            decisions=[decision(evidence=["unknown-source-chunk"])]).model_dump_json())
+    else:
+        cache = next(output.glob("selection-*.json"))
+        cache.write_text(editorial.EditionSelection(selected_ids=["not-in-shortlist"], excluded=[]).model_dump_json())
+    calls.clear()
+    result = editorial.run_editorial(repository, settings, config)
+    assert result["selection"]["selected_ids"] == ["one"]
+    assert calls == ["selection" if damage == "selection_id" else "candidate"]
+    calls.clear()
+    editorial.run_editorial(repository, settings, config)
+    assert calls == []
 
 
 def test_untrusted_html_is_only_text():

@@ -4,7 +4,7 @@ import { loadEnvFile } from "node:process";
 import { readFile, readdir, stat, rm } from "node:fs/promises";
 import path from "node:path";
 import { dateInZone, editionSchema, validateBuildFreshness } from "../src/lib/edition";
-import { atomicJson, readJson, reusable, runStages, reserveAttempt, type AttemptBudget, type RunState, type Stage } from "./lib/daily-publisher";
+import { atomicJson, readJson, reusable, runStages, reserveAttempt, dailyAttemptLimit, retryCooldownMs, type AttemptBudget, type RunState, type Stage } from "./lib/daily-publisher";
 import { fetchPublic, restorePublication } from "./lib/restore-publication";
 import { hash, releaseFiles, prepareRelease } from "./lib/static-release";
 import { verifyLocalRelease } from "./lib/verify-local-release";
@@ -142,9 +142,17 @@ async function main() {
   } catch (error) {
     // Detailed errors go to the private journal. Keep the health file credential-free.
     const block = await quotaBlock();
-    await atomicJson(statusFile, { date, status: block ? "blocked" : "failed", checkedAt: new Date().toISOString(),
-      detail: block ? block.reason : "See publisher journal and publisher-state.json",
+    const message = error instanceof Error ? error.message : String(error);
+    const cooling = message.startsWith("Publisher retry cooling down");
+    const exhausted = message.startsWith("Daily attempt budget exhausted");
+    const budget = await readJson<AttemptBudget>(attemptsFile);
+    await atomicJson(statusFile, { date, status: block || exhausted ? "blocked" : cooling ? "waiting" : "failed", checkedAt: new Date().toISOString(),
+      detail: block ? block.reason : exhausted ? "Daily automatic recovery attempts exhausted" : cooling ? "Waiting for the retry cooldown" : "See publisher journal and publisher-state.json",
+      ...(budget?.date === date ? { attempts: budget.attempts, attemptLimit: dailyAttemptLimit } : {}),
+      ...(cooling && budget ? { retryAfter: new Date(Date.parse(budget.lastStartedAt) + retryCooldownMs).toISOString() } : {}),
+      ...(exhausted ? { action: "Automatic attempts reset for the next edition date; inspect the journal for the original failed stage" } : {}),
       ...(block ? { retryAfter: block.retryAfter, action: block.action } : {}) });
+    if (cooling) { console.log(message); return; }
     throw error;
   }
 }

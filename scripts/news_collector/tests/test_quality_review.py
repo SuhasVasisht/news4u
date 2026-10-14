@@ -25,6 +25,49 @@ def reviewed_fixture():
     return review
 
 
+def test_invalid_coverage_selection_cache_regenerates_before_final_gate(tmp_path, monkeypatch):
+    from news_collector.pipeline.editorial import EditionSelection
+    review = reviewed_fixture()
+    review["packets"][0]["kind"] = "reporting"
+    calls = []
+    monkeypatch.setattr(quality_review, "codex_review", lambda *_: calls.append(True) or EditionSelection(
+        selected_ids=["a"], excluded=[]))
+    checklist = review["finalAudit"]["checklist"]
+    quality_review.reconsider_announcements(review, [], tmp_path, checklist)
+    cache = next(tmp_path.glob("coverage-selection-*.json"))
+    cache.write_text(EditionSelection(selected_ids=["unknown-admission"], excluded=[]).model_dump_json())
+    quality_review.reconsider_announcements(review, [], tmp_path, checklist)
+    assert calls == [True, True]
+    assert review["selection"]["selected_ids"] == ["a"]
+    quality_review.reconsider_announcements(review, [], tmp_path, checklist)
+    assert calls == [True, True]
+
+
+def test_invalid_audit_cache_regenerates_but_valid_factual_holds_are_reused(tmp_path, monkeypatch):
+    request, envelope = fixture()
+    held = StoryAuditReview.model_validate({"stories": envelope["review"]["stories"]})
+    held.stories[0].verdict = "hold"
+    calls = []
+    monkeypatch.setattr(quality_review, "codex_review", lambda *_args, **_kwargs: calls.append(True) or held)
+    prompt = tmp_path / "audit-prompt.md"
+    prompt.write_text("Keep unsupported claims held")
+    def validate(result):
+        candidate = deepcopy(envelope)
+        candidate["review"]["stories"] = result.model_dump(mode="json")["stories"]
+        return validate_audit(candidate, request, NOW)
+    for _ in range(2):
+        result = quality_review.cached_audit(request, prompt, tmp_path, StoryAuditReview, validate)
+        assert validate(result).status == "blocked"
+    assert calls == [True]
+    cache = next((tmp_path / "audit-calls").glob("*.json"))
+    damaged = held.model_copy(deep=True)
+    damaged.stories[0].claims[0].evidence = ["unknown-source-chunk"]
+    cache.write_text(damaged.model_dump_json())
+    result = quality_review.cached_audit(request, prompt, tmp_path, StoryAuditReview, validate)
+    assert calls == [True, True]
+    assert validate(result).status == "blocked"
+
+
 def test_valid_final_audit_can_be_verified_at_export():
     assert verify_final_audit(reviewed_fixture(), [], NOW).status == "passed"
 

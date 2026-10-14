@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reusable, runStages, reserveAttempt, type RunState, type Stage } from "../scripts/lib/daily-publisher";
+import { reusable, runStages, reserveAttempt, dailyAttemptLimit, type RunState, type Stage } from "../scripts/lib/daily-publisher";
 
 const state = (): RunState => ({ date: "2026-10-04", revision: "code", history: "history", startedAt: "2026-10-04T14:00:00Z", updatedAt: "2026-10-04T14:00:00Z", completed: [], status: "running" });
 describe("daily publishing recovery", () => {
@@ -53,8 +53,17 @@ it("bounds daily retries independently of checkpoint restarts and resets on the 
   const first = reserveAttempt(undefined, "2026-10-06", "revision", new Date("2026-10-06T14:00:00Z"));
   expect(() => reserveAttempt(first, first.date, first.revision, new Date("2026-10-06T14:30:00Z"))).toThrow("cooling down");
   const second = reserveAttempt(first, first.date, first.revision, new Date("2026-10-06T15:00:00Z"));
-  const third = reserveAttempt(second, first.date, first.revision, new Date("2026-10-06T16:00:00Z"));
-  expect(() => reserveAttempt(third, first.date, first.revision, new Date("2026-10-06T17:00:00Z"))).toThrow("budget exhausted");
-  expect(reserveAttempt(third, "2026-10-07", first.revision, new Date("2026-10-07T14:00:00Z")).attempts).toBe(1);
-  expect(reserveAttempt(third, first.date, "fixed-revision", new Date("2026-10-06T17:00:00Z")).attempts).toBe(1);
+  let last = second;
+  for (let i = 2; i < dailyAttemptLimit; i++) last = reserveAttempt(last, first.date, first.revision, new Date(Date.parse(first.lastStartedAt) + i * 3600_000));
+  expect(() => reserveAttempt(last, first.date, first.revision, new Date(Date.parse(last.lastStartedAt) + 3600_000))).toThrow("budget exhausted");
+  expect(reserveAttempt(last, "2026-10-07", first.revision, new Date("2026-10-07T14:00:00Z")).attempts).toBe(1);
+  expect(reserveAttempt(last, first.date, "fixed-revision", new Date("2026-10-06T17:00:00Z")).attempts).toBe(1);
+});
+
+it("accepts real hourly timer jitter and allows afternoon recovery after morning failures", () => {
+  let budget = reserveAttempt(undefined, "2026-10-13", "code", new Date("2026-10-13T14:05:23.604Z"));
+  budget = reserveAttempt(budget, budget.date, budget.revision, new Date("2026-10-13T15:05:23.400Z"));
+  expect(budget.attempts).toBe(2);
+  for (let hour = 16; hour <= 23; hour++) budget = reserveAttempt(budget, budget.date, budget.revision, new Date(`2026-10-13T${hour}:05:24Z`));
+  expect(budget.attempts).toBe(10);
 });

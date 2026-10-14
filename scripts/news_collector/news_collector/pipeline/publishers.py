@@ -1,14 +1,42 @@
 """Shared publisher identity and deterministic edition limits."""
 from urllib.parse import urlparse
 from collections import Counter
+import hashlib
+import json
+
+# Public institutions use several domain conventions. A .org suffix alone does
+# not establish authority; allow only explicit institutional roots/subdomains.
+PUBLIC_INSTITUTIONS = {
+    "imf.org": "International Monetary Fund", "worldbank.org": "World Bank",
+    "un.org": "United Nations", "oecd.org": "OECD",
+    "wto.org": "World Trade Organization", "ilo.org": "International Labour Organization",
+    "unesco.org": "UNESCO", "iaea.org": "International Atomic Energy Agency",
+    "unhcr.org": "UNHCR", "unicef.org": "UNICEF", "ohchr.org": "UN Human Rights Office",
+    "canada.ca": "Government of Canada",
+}
+PUBLIC_ROOTS = {"gov.uk", "europa.eu"}
+PUBLIC_SUFFIXES = (".gov", ".gov.uk", ".europa.eu", ".int", ".gov.in", ".gov.au",
+                   ".gc.ca", ".gouv.fr", ".go.jp", ".govt.nz", ".gov.br", ".gov.za",
+                   ".admin.ch", ".bund.de")
+
+def public_institution(host):
+    host = host.lower().rstrip(".").removeprefix("www.")
+    return next((name for root, name in PUBLIC_INSTITUTIONS.items()
+                 if host == root or host.endswith("." + root)), None)
+
+def authority_policy_fingerprint():
+    return hashlib.sha256(json.dumps([PUBLIC_INSTITUTIONS, PUBLIC_SUFFIXES, sorted(PUBLIC_ROOTS)], sort_keys=True).encode()).hexdigest()
 
 def authoritative_host(host: str) -> bool:
-    host = host.lower().removeprefix("www.")
-    return (host in {"gov.uk", "europa.eu", "who.int", "ecb.europa.eu"}
-            or host.endswith((".gov", ".gov.uk", ".europa.eu", ".int")))
+    host = host.lower().rstrip(".").removeprefix("www.")
+    return (bool(public_institution(host)) or host in PUBLIC_ROOTS
+            or host.endswith(PUBLIC_SUFFIXES))
 
 def publisher(url: str) -> str:
     host = (urlparse(url).hostname or "").removeprefix("www.")
+    institution = public_institution(host)
+    if institution:
+        return institution
     return {"bbc.com": "BBC", "bbc.co.uk": "BBC", "techcrunch.com": "TechCrunch", "theguardian.com": "The Guardian", "apnews.com": "AP", "arxiv.org": "arXiv", "sec.gov": "SEC", "techmeme.com": "Techmeme", "news.ycombinator.com": "Hacker News",
             "lennysnewsletter.com": "Lenny's Newsletter", "dwarkesh.com": "Dwarkesh Podcast",
             "simonwillison.net": "Simon Willison", "interconnects.ai": "Interconnects",

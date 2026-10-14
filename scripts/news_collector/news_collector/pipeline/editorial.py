@@ -391,6 +391,20 @@ def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, a
                 print(f"Retrying review after output validation failed: {str(exc)[:400]}", flush=True)
 
 
+def load_validated_cache(path, result_type, validate):
+    """An invalid optimization must not prevent a fresh, bounded review."""
+    if not path.exists():
+        return None
+    try:
+        result = result_type.model_validate_json(path.read_text())
+        validate(result)
+        return result
+    except (ValueError, KeyError, TypeError) as exc:
+        print(f"Discarding invalid cached {result_type.__name__}: {str(exc)[:300]}", flush=True)
+        path.unlink()
+        return None
+
+
 def validate_selection(selection, shortlist):
     known = {s["id"] for s in shortlist}
     accounted = selection.selected_ids + [s.id for s in selection.excluded]
@@ -430,7 +444,7 @@ def validate_decisions(reviewed, packets):
                     raise ValueError("Podcast notes must cover the beginning and final part of the transcript")
 
 
-def run_editorial(repository, settings, config, review_file=None, prepare_only=False):
+def run_editorial(repository, settings, config, review_file=None, prepare_only=False, required_urls=()):
     now = datetime.now(timezone.utc)
     validation_now = now
     output = settings.project_root.parent.parent / "data/editorial"
@@ -458,7 +472,7 @@ def run_editorial(repository, settings, config, review_file=None, prepare_only=F
         except (TypeError, ValueError):
             score = 0
         published = parse_datetime(row.get("published_at"))
-        return score, published.timestamp() if published else 0
+        return row["canonical_url"] in required_urls, score, published.timestamp() if published else 0
     rows.sort(key=candidate_priority, reverse=True)
     candidates, excluded, counts, seen = [], [], Counter(), set()
     podcast_sources = set()
@@ -484,7 +498,7 @@ def run_editorial(repository, settings, config, review_file=None, prepare_only=F
             continue
         bucket = (row["source"], has_audio, None if has_audio else row["category"])
         limit = 1 if has_audio and row["source"] in LONGFORM else int(source_config[row["source"]].get("editorial_limit", 8))
-        if counts[bucket] >= limit:
+        if counts[bucket] >= limit and row["canonical_url"] not in required_urls:
             excluded.append({"url": row["canonical_url"], "source": row["source"], "reason": "candidate_budget"})
             continue
         counts[bucket] += 1
@@ -520,9 +534,8 @@ def run_editorial(repository, settings, config, review_file=None, prepare_only=F
         packet_path = output / f"packet-{packet['id']}.json"
         packet_path.write_text(json.dumps(packet, ensure_ascii=False, indent=2))
         cache = output / f"review-{key}.json"
-        if cache.exists():
-            result = ReviewBatch.model_validate_json(cache.read_text())
-            validate_decisions(result, [packet])
+        result = load_validated_cache(cache, ReviewBatch, lambda result: validate_decisions(result, [packet]))
+        if result is not None:
             decisions[packet["id"]] = result.decisions[0].model_dump()
         else:
             pending.append((packet, cache))
@@ -568,11 +581,12 @@ def run_editorial(repository, settings, config, review_file=None, prepare_only=F
                  for p in packets if decisions[p["id"]]["decision"] == "admit"]
     selection_key = hashlib.sha256((json.dumps(shortlist, sort_keys=True) + selection_prompt.read_text() + history_hash(history)).encode()).hexdigest()
     selection_path = output / f"selection-{selection_key}.json"
+    selection = None
     if external is not None:
         selection = external.selection
-    elif selection_path.exists():
-        selection = EditionSelection.model_validate_json(selection_path.read_text())
     else:
+        selection = load_validated_cache(selection_path, EditionSelection, lambda result: validate_selection(result, shortlist))
+    if selection is None:
         print("Editorial desk: reviewing the complete proposed edition", flush=True)
         selection = codex_review({"shortlist": shortlist, "previouslyPublished": history}, selection_prompt, output, EditionSelection)
     validate_selection(selection, shortlist)

@@ -55,10 +55,14 @@ export async function runStages(state: RunState, run: (stage: Stage) => Promise<
   await save(state);
 }
 
+// Match the sixteen 07:05..22:05 recovery slots instead of abandoning the day
+// after three transient failures. The cooldown still prevents rapid model loops.
+export const dailyAttemptLimit = 16;
+export const retryCooldownMs = 55 * 60_000;
 export type AttemptBudget = { date: string; revision: string; attempts: number; lastStartedAt: string };
 export function reserveAttempt(prior: AttemptBudget | undefined, date: string, revision: string, now: Date): AttemptBudget {
   const current = prior?.date === date && prior.revision === revision ? prior : undefined;
-  if (current && current.attempts >= 3) throw new Error("Daily attempt budget exhausted (3 attempts). Inspect the journal; retry requires a code/configuration change or --retry-editor.");
-  if (current && now.getTime() - Date.parse(current.lastStartedAt) < 60 * 60_000) throw new Error("Publisher retry cooling down for one hour after the previous start.");
+  if (current && current.attempts >= dailyAttemptLimit) throw new Error(`Daily attempt budget exhausted (${dailyAttemptLimit} attempts). Inspect the journal; retry requires a code/configuration change or --retry-editor.`);
+  if (current && now.getTime() - Date.parse(current.lastStartedAt) < retryCooldownMs) throw new Error("Publisher retry cooling down for 55 minutes after the previous start.");
   return { date, revision, attempts: (current?.attempts || 0) + 1, lastStartedAt: now.toISOString() };
 }

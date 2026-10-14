@@ -138,3 +138,33 @@ def test_final_event_review_handles_different_headlines_and_caches_validated_sel
     assert sports.reconcile_sports_events(request, [first, second], prompt, tmp_path) == result
     assert len(calls) == 1
     assert calls[0]['shortlist'][0]['sportsGroup'] == 'Soccer'
+
+
+@pytest.mark.parametrize("second_group", ["NFL", "Elsewhere"])
+def test_model_selected_overlaps_are_resolved_before_publication_and_cache_resume(tmp_path, monkeypatch, second_group):
+    from news_collector.pipeline.editorial import Decision, EditionSelection
+    from news_collector.pipeline import sports as sports_pipeline
+    from test_sports import review_fixture, NOW
+    settings, request, response = review_fixture(tmp_path, monkeypatch, 2)
+    request["previouslyPublished"] = []
+    request["packets"][1]["sportsGroup"] = second_group
+    request["requestHash"] = sports.fingerprint({key: value for key, value in request.items() if key != "requestHash"})
+    response["requestHash"] = request["requestHash"]
+    for item in response["decisions"]:
+        item["headline"] = "Quarterback returns from injury before Sunday's game"
+        item["summary"] = "The quarterback returned to practice after recovering from a shoulder injury."
+    response["decisions"][0]["importance"] = 80
+    decisions = [Decision.model_validate(item) for item in response["decisions"]]
+    calls = []
+    monkeypatch.setattr(sports, "codex_review", lambda *_: calls.append(True) or EditionSelection(
+        selected_ids=["0", "1"], excluded=[]))
+    prompt = tmp_path / "events.md"
+    prompt.write_text("Choose distinct sports events")
+    selection = sports.reconcile_sports_events(request, decisions, prompt, tmp_path)
+    assert selection["selected_ids"] == ["0"]
+    assert {item["id"] for item in selection["excluded"]} == {"1"}
+    assert sports.reconcile_sports_events(request, decisions, prompt, tmp_path) == selection
+    assert len(calls) == 1
+    response["selection"] = selection
+    result = sports_pipeline.publish_sports(request, response, settings, None, NOW, "America/Los_Angeles")
+    assert [story["id"] for story in result["stories"]] == ["0"]

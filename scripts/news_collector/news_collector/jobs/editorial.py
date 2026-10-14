@@ -73,7 +73,8 @@ def prepare_editorial(repository, settings, config, args, required_urls=()):
                 return approved
         except (ValueError, KeyError):
             pass  # Changed/incomplete approval requires the normal fresh desk.
-    result = run_editorial(repository, settings, config, review_file=args.review_file, prepare_only=args.prepare_review)
+    result = run_editorial(repository, settings, config, review_file=args.review_file,
+                          prepare_only=args.prepare_review, required_urls=set(required_urls))
     if can_resume:
         atomic_json(marker, {"key": key, "review": result})
     return result

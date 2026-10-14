@@ -24,6 +24,12 @@ LIMITS = {"NFL": 2, "Soccer": 3, "NBA": 2, "Elsewhere": 2}
 NOISE = re.compile(r"\b(fantasy|betting|odds|picks|power rankings|tiers|predictions|follow live|live updates|grading the move|offseason recap|early.season preview|transfer rumo\w*|gossip|talking points|as opener nears)\b", re.I)
 
 
+def overlapping_sports_prose(left_title, left_summary, right_title, right_summary):
+    """Use one duplicate contract in final selection and publication."""
+    return (fuzz.token_set_ratio(left_title, right_title) >= 70
+            and fuzz.token_set_ratio(left_summary, right_summary) >= 50)
+
+
 def config_for(settings):
     config = yaml.safe_load((settings.project_root / "config/sports.yaml").read_text())
     config["carryover"] = json.loads((settings.project_root / "config/sports-carryover.json").read_text())
@@ -259,8 +265,7 @@ def publish_sports(request, review, settings, repository, now, zone):
                 raise ValueError("Previously published sports story selected again")
             if p.get("carryoverFrom") != prior["date"] or not d.summary.startswith("From yesterday's late edition:"):
                 raise ValueError("Sports carryover must retain its date and explicit reader label")
-        if any((fuzz.token_set_ratio(s["title"], d.headline) >= 70
-                and fuzz.token_set_ratio(s["summary"], d.summary) >= 50) for s in stories):
+        if any(overlapping_sports_prose(s["title"], s["summary"], d.headline, d.summary) for s in stories):
             raise ValueError("Overlapping sports headlines selected")
         image = quality_image(repository, p["url"], [], settings.user_agent)["image"]
         stories.append({"id": id, "title": d.headline, "summary": d.summary, "sector": "Sports", "sportsGroup": group,
