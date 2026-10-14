@@ -45,9 +45,25 @@ def test_verified_discovery_enters_database_for_normal_desk_and_is_idempotent(tm
     assert rows[0]["title"] == "Publisher headline"
     assert rows[0]["published_at"] == NOW.isoformat()
     assert rows[0]["text"].startswith("publisher evidence")
+    assert json.loads(rows[0]["raw_json"])["_content_basis"] == "publisher_article"
     assert intake.collect_required_sources(checklist(), NOW, repository, "test") == required
     assert len(repository.fetch_recent_items()) == 1
     assert calls == [URL]
+
+
+def test_short_verified_publisher_article_keeps_provenance_without_second_fetch(tmp_path, monkeypatch):
+    from news_collector.pipeline import editorial
+    repository, calls = setup_page(tmp_path, monkeypatch, words=300)
+    intake.collect_required_sources(checklist(), NOW, repository, "test")
+    fetched = []
+    monkeypatch.setattr(editorial, "download", lambda *_args: fetched.append(True) or (_ for _ in ()).throw(
+        RuntimeError("Publisher subsequently unavailable")))
+    source = repository.fetch_recent_items()[0]
+    result = editorial.content_packet(source, repository, "test")
+    assert result["wordCount"] == 300
+    assert result["basis"] == "Publisher article"
+    assert calls == [URL]
+    assert fetched == []
 
 
 @pytest.mark.parametrize("date,words", [(NOW - timedelta(days=3), 150),

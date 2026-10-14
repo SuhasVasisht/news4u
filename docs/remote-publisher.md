@@ -423,3 +423,12 @@ Sports selection and export use the same deterministic overlap predicate across
 sports groups. Invalid news decision/selection/audit caches are discarded and
 regenerated through bounded normal review. Valid factual holds remain cached and
 blocked; cache recovery cannot be used to repeatedly seek a lucky approval.
+
+Article basis tracks controlled acquisition provenance as well as length. A short
+publisher article retrieved by coverage intake is identified as a publisher article;
+its length alone does not turn it into a feed excerpt or trigger a redundant fetch.
+Legacy controlled intake records are recognized too. The resolved provenance is
+bound into their source hashes so an old incorrectly labeled approval cannot
+silently resume. Ordinary feed excerpts retain their label when extraction fails.
+Word-count, evidence, quality and truncation gates remain unchanged. Publisher
+identity aliases are included in source-verification cache policy identity.

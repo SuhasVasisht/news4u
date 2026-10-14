@@ -45,7 +45,7 @@ def collect_required_sources(checklist, cutoff, repository, user_agent):
                 raw = RawItem(source="coverage_research", source_type="scrape", category="world",
                               title=title, url=final_url, published_at=date, text=text,
                               image_url=extract_image_from_page_html(html, final_url),
-                              raw={"_coverage_discovery_url": url})
+                              raw={"_coverage_discovery_url": url, "_content_basis": "publisher_article"})
                 prepare_images([raw], repository, user_agent)
                 normalized = normalize_item(raw)
                 repository.insert_raw_item(raw)

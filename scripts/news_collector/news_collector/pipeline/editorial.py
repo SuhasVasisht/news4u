@@ -150,6 +150,13 @@ def exclusion(row, now):
     return None
 
 
+def coverage_article_acquisition(row, raw=None):
+    """Only controlled direct-source intake metadata establishes acquisition."""
+    raw = raw if raw is not None else json.loads(row.get("raw_json") or "{}")
+    return (row["source"] == "coverage_research"
+            and (raw.get("_content_basis") == "publisher_article" or bool(raw.get("_coverage_discovery_url"))))
+
+
 def content_packet(row, repository, user_agent):
     raw = json.loads(row.get("raw_json") or "{}")
     published_at = row["published_at"]
@@ -170,25 +177,28 @@ def content_packet(row, repository, user_agent):
     kind = "podcast" if audio and row["source"] in LONGFORM else raw.get("_editorial_type", "reporting")
     if kind == "podcast" and not audio:
         kind = "analysis"
-    basis = "Publisher transcript" if audio and len(text.split()) > 2500 else "Publisher article" if len(text.split()) >= 400 else "Feed excerpt"
-    if (len(text.split()) < 400 or row["source"] == "doj_antitrust") and kind != "podcast":
+    publisher_article = coverage_article_acquisition(row, raw)
+    basis = "Publisher transcript" if audio and len(text.split()) > 2500 else "Publisher article" if publisher_article or len(text.split()) >= 400 else "Feed excerpt"
+    if ((len(text.split()) < 400 and not publisher_article) or row["source"] == "doj_antitrust") and kind != "podcast":
         cached = repository.get_cached_content(row["canonical_url"])
         checked = parse_datetime(cached.get("checked_at")) if cached else None
         fresh_cache = checked and timedelta(0) <= datetime.now(timezone.utc) - checked < timedelta(hours=6)
         cache_status = "editorial-full-doj-v2" if row["source"] == "doj_antitrust" else "editorial-full"
         if cached and cached.get("status") == cache_status and fresh_cache:
             text = cached["content_text"]
+            publisher_article = bool(text)
         else:
             try:
                 with httpx.Client(timeout=15, follow_redirects=False, headers={"User-Agent": user_agent}) as client:
                     body, final_url = download(client, row["url"], 3_000_000)
                 extracted = extract_text_from_html(body.decode("utf-8", errors="replace"), final_url) or ""
-                if len(extracted.split()) > len(text.split()):
+                if extracted.strip() and len(extracted.split()) >= len(text.split()):
                     text = extracted
+                    publisher_article = True
                     repository.set_cached_content(row["canonical_url"], text, datetime.now(timezone.utc).isoformat(), status=cache_status)
             except Exception:
                 pass
-        basis = "Publisher article" if len(text.split()) >= 400 else "Feed excerpt"
+        basis = "Publisher article" if publisher_article or len(text.split()) >= 400 else "Feed excerpt"
     duration = None
     if row["source"] == "theo_video":
         from youtube_transcript_api import YouTubeTranscriptApi
@@ -219,8 +229,10 @@ def content_packet(row, repository, user_agent):
 
 
 def source_hash(row):
-    return hashlib.sha256(json.dumps({k: row.get(k) for k in
-        ["canonical_url", "title", "published_at", "text", "summary"]}, sort_keys=True).encode()).hexdigest()
+    evidence = {k: row.get(k) for k in ["canonical_url", "title", "published_at", "text", "summary"]}
+    if row["source"] == "coverage_research":
+        evidence["content_acquisition"] = "publisher_article" if coverage_article_acquisition(row) else None
+    return hashlib.sha256(json.dumps(evidence, sort_keys=True).encode()).hexdigest()
 
 
 def codex_review(packets, prompt_path, output_dir, result_type=ReviewBatch, *, allow_web=False, validate_result=None):

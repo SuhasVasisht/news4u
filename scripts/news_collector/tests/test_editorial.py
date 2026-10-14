@@ -311,6 +311,58 @@ def test_expired_article_cache_is_not_silently_reused(tmp_path, monkeypatch):
     assert editorial.content_packet(item, repository, "Test")["wordCount"] == 3
 
 
+@pytest.mark.parametrize("metadata", [{"_content_basis": "publisher_article"},
+                                      {"_coverage_discovery_url": "https://example.com/report"}])
+def test_controlled_short_article_provenance_survives_legacy_metadata(metadata, monkeypatch):
+    item = row(source="coverage_research", text="evidence " * 393, raw_json=json.dumps(metadata))
+    calls = []
+    repository = SimpleNamespace(get_cached_content=lambda *_: calls.append(True))
+    result = editorial.content_packet(item, repository, "Test")
+    assert result["basis"] == "Publisher article"
+    assert result["wordCount"] == 393
+    assert calls == []
+    assert source_hash(item) != source_hash({**item, "raw_json": "{}"})
+
+
+def test_equally_long_feed_excerpt_is_not_relabelled_when_article_fetch_fails(monkeypatch):
+    item = row(text="feed evidence " * 150, raw_json=json.dumps({"_content_basis": "publisher_article"}))
+    repository = SimpleNamespace(get_cached_content=lambda *_: None)
+    monkeypatch.setattr(editorial, "download", lambda *_: (_ for _ in ()).throw(RuntimeError("Unavailable")))
+    result = editorial.content_packet(item, repository, "Test")
+    assert result["wordCount"] == 300
+    assert result["basis"] == "Feed excerpt"
+
+
+@pytest.mark.parametrize("acquisition", ["fresh_fetch", "fresh_cache"])
+def test_acquired_short_article_has_publisher_basis_independent_of_length(monkeypatch, acquisition):
+    text = "publisher evidence " * 150
+    cached = ({"content_text": text, "status": "editorial-full",
+               "checked_at": datetime.now(timezone.utc).isoformat()} if acquisition == "fresh_cache" else None)
+    writes, downloads = [], []
+    repository = SimpleNamespace(get_cached_content=lambda *_: cached, set_cached_content=lambda *args, **kwargs: writes.append(args))
+    monkeypatch.setattr(editorial, "download", lambda *_: downloads.append(True) or (b"<article>Evidence</article>", "https://example.com/report"))
+    monkeypatch.setattr(editorial, "extract_text_from_html", lambda *_: text)
+    result = editorial.content_packet(row(text="feed evidence " * 150, raw_json="{}"), repository, "Test")
+    assert result["basis"] == "Publisher article"
+    assert result["wordCount"] == 300
+    assert len(downloads) == (acquisition == "fresh_fetch")
+    assert len(writes) == (acquisition == "fresh_fetch")
+
+
+@pytest.mark.parametrize("damage", ["thin", "quality", "truncated", "unknown_evidence"])
+def test_explicit_article_provenance_does_not_relax_admission_gates(damage):
+    source = row(source="coverage_research", text="evidence " * (79 if damage == "thin" else 100),
+                 raw_json=json.dumps({"_content_basis": "publisher_article"}))
+    result = editorial.content_packet(source, None, "Test")
+    assert result["basis"] == "Publisher article"
+    if damage == "truncated":
+        result["truncated"] = True
+    assessed = decision(id=result["id"], quality=64 if damage == "quality" else 80,
+                        evidence=["unknown"] if damage == "unknown_evidence" else ["p1"])
+    with pytest.raises(ValueError):
+        validate_decisions(ReviewBatch(decisions=[assessed]), [result])
+
+
 def test_external_review_is_bound_to_sources_time_and_existing_quality_gates():
     payload = {"requestHash": "request-hash", "reviewer": "Explicit editorial desk",
                "reviewedAt": NOW.isoformat(), "decisions": [decision().model_dump()],

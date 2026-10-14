@@ -195,6 +195,13 @@ def test_every_authority_policy_component_invalidates_verification_cache(monkeyp
     assert publishers.authority_policy_fingerprint() != original
 
 
+def test_publisher_identity_alias_changes_invalidate_verification_cache(monkeypatch):
+    from news_collector.pipeline import publishers
+    original = publishers.authority_policy_fingerprint()
+    monkeypatch.setattr(publishers, 'PUBLISHER_NAMES', {**publishers.PUBLISHER_NAMES, 'alias.example': 'BBC'})
+    assert publishers.authority_policy_fingerprint() != original
+
+
 def test_verified_source_contract_keeps_final_url_actual_date_and_removes_failed_companion(monkeypatch):
     def download(_, url, __):
         if 'apnews' in url:

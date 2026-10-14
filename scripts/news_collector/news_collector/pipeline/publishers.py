@@ -19,25 +19,7 @@ PUBLIC_SUFFIXES = (".gov", ".gov.uk", ".europa.eu", ".int", ".gov.in", ".gov.au"
                    ".admin.ch", ".bund.de", ".gov.cn", ".gob.mx")
 PUBLIC_ROOTS = {suffix[1:] for suffix in PUBLIC_SUFFIXES if "." in suffix[1:]}
 
-def public_institution(host):
-    host = host.lower().rstrip(".").removeprefix("www.")
-    return next((name for root, name in PUBLIC_INSTITUTIONS.items()
-                 if host == root or host.endswith("." + root)), None)
-
-def authority_policy_fingerprint():
-    return hashlib.sha256(json.dumps([PUBLIC_INSTITUTIONS, PUBLIC_SUFFIXES, sorted(PUBLIC_ROOTS)], sort_keys=True).encode()).hexdigest()
-
-def authoritative_host(host: str) -> bool:
-    host = host.lower().rstrip(".").removeprefix("www.")
-    return (bool(public_institution(host)) or host in PUBLIC_ROOTS
-            or host.endswith(PUBLIC_SUFFIXES))
-
-def publisher(url: str) -> str:
-    host = (urlparse(url).hostname or "").removeprefix("www.")
-    institution = public_institution(host)
-    if institution:
-        return institution
-    return {"bbc.com": "BBC", "bbc.co.uk": "BBC", "techcrunch.com": "TechCrunch", "theguardian.com": "The Guardian", "apnews.com": "AP", "arxiv.org": "arXiv", "sec.gov": "SEC", "techmeme.com": "Techmeme", "news.ycombinator.com": "Hacker News",
+PUBLISHER_NAMES = {"bbc.com": "BBC", "bbc.co.uk": "BBC", "techcrunch.com": "TechCrunch", "theguardian.com": "The Guardian", "apnews.com": "AP", "arxiv.org": "arXiv", "sec.gov": "SEC", "techmeme.com": "Techmeme", "news.ycombinator.com": "Hacker News",
             "lennysnewsletter.com": "Lenny's Newsletter", "dwarkesh.com": "Dwarkesh Podcast",
             "simonwillison.net": "Simon Willison", "interconnects.ai": "Interconnects",
             "latent.space": "Latent Space", "arstechnica.com": "Ars Technica",
@@ -50,7 +32,27 @@ def publisher(url: str) -> str:
             "spectrum.ieee.org": "IEEE Spectrum", "macrumors.com": "MacRumors",
             "alphasignal.ai": "AlphaSignal", "blog.bytebytego.com": "ByteByteGo",
             "dol.gov": "US Department of Labor", "ecb.europa.eu": "European Central Bank",
-            "salesforce.com": "Salesforce", "hawley.senate.gov": "Senator Hawley's office"}.get(host, host)
+            "salesforce.com": "Salesforce", "hawley.senate.gov": "Senator Hawley's office"}
+
+def public_institution(host):
+    host = host.lower().rstrip(".").removeprefix("www.")
+    return next((name for root, name in PUBLIC_INSTITUTIONS.items()
+                 if host == root or host.endswith("." + root)), None)
+
+def authority_policy_fingerprint():
+    return hashlib.sha256(json.dumps([PUBLIC_INSTITUTIONS, PUBLIC_SUFFIXES, sorted(PUBLIC_ROOTS), PUBLISHER_NAMES], sort_keys=True).encode()).hexdigest()
+
+def authoritative_host(host: str) -> bool:
+    host = host.lower().rstrip(".").removeprefix("www.")
+    return (bool(public_institution(host)) or host in PUBLIC_ROOTS
+            or host.endswith(PUBLIC_SUFFIXES))
+
+def publisher(url: str) -> str:
+    host = (urlparse(url).hostname or "").removeprefix("www.")
+    institution = public_institution(host)
+    if institution:
+        return institution
+    return PUBLISHER_NAMES.get(host, host)
 
 
 def limit_publishers(selection, packets, maximum=4):
