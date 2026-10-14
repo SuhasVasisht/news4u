@@ -139,7 +139,7 @@ def test_same_edition_retry_preserves_hold_when_only_clock_and_other_selections_
     assert reusable_story_checks(request, later, report) == []
 
 
-@pytest.mark.parametrize('change', [None, 'evidence', 'prose', 'history', 'next_day', 'expired'])
+@pytest.mark.parametrize('change', [None, 'evidence', 'prose', 'history', 'next_day', 'late_same_day'])
 def test_archived_unchanged_hold_wins_over_a_later_accidental_approval(tmp_path, monkeypatch, change):
     from datetime import datetime, timedelta
     from news_collector.pipeline import quality_review
@@ -169,11 +169,29 @@ def test_archived_unchanged_hold_wins_over_a_later_accidental_approval(tmp_path,
         current['history'].append({'id': 'another-published-story'})
     elif change == 'next_day':
         current['cutoff'] = (NOW + timedelta(days=1)).isoformat()
-    elif change == 'expired':
+    elif change == 'late_same_day':
         current['cutoff'] = (NOW + timedelta(hours=7)).isoformat()
     reused = [] if change else quality_review.StoryAuditReview(stories=accidental['review']['stories']).stories
     checks = quality_review.archived_story_checks(tmp_path, current, reused, 'America/Los_Angeles')
-    if change:
+    if change and change != 'late_same_day':
         assert checks == []
     else:
         assert checks[0].verdict == 'hold' and checks[0].priorStoryIds == ['yesterday']
+
+
+@pytest.mark.parametrize('finding', ['approval', 'hold', 'incomplete_review', 'unresolved_claim'])
+def test_late_same_day_reuses_blocks_but_expires_approvals(finding):
+    from datetime import timedelta
+    request, envelope = fixture()
+    story = envelope['review']['stories'][0]
+    if finding == 'hold':
+        story['verdict'] = 'hold'
+    elif finding == 'incomplete_review':
+        story['attributionChecked'] = False
+    elif finding == 'unresolved_claim':
+        story['claims'][0]['verdict'] = 'uncertain'
+    report = validate_audit(envelope, request, NOW)
+    later = deepcopy(request)
+    later['cutoff'] = (NOW + timedelta(hours=8)).isoformat()
+    checks = reusable_story_checks(request, later, report)
+    assert [check.id for check in checks] == ([] if finding == 'approval' else ['a'])

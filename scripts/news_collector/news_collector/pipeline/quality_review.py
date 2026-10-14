@@ -151,6 +151,19 @@ def run_batched_audit(request, prompt, output, reused, batch_size=5):
                 "reviewedAt": datetime.now(timezone.utc).isoformat(),
                 "review": {"stories": [s.model_dump(mode="json") for s in result.stories], "coverage": []}}, partial)
         result = cached_audit(payload, prompt, output, StoryAuditReview, validate_batch)
+        # Persist the evidence-bound findings before the next external call. A
+        # later batch/coverage failure must not erase a hold when the next
+        # collection advances the cutoff (and therefore changes call-cache keys).
+        partial = build_audit_request(payload["packets"], payload["decisions"],
+            {"selected_ids": ids, "excluded": []}, request["history"], None,
+            datetime.fromisoformat(request["cutoff"]))
+        envelope = {"requestHash": partial["requestHash"],
+                    "reviewer": "independent story desk; coverage pending",
+                    "reviewedAt": datetime.now(timezone.utc).isoformat(),
+                    "review": {"stories": result.model_dump(mode="json")["stories"], "coverage": []}}
+        validate_audit(envelope, partial)
+        atomic_json(output / f"audit-record-stories-{partial['requestHash']}.json",
+                    {"request": partial, "response": envelope})
         story_reviews.extend(result.stories)
 
     all_story_reviews = [*story_reviews, *reused]

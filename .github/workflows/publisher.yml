@@ -3,6 +3,31 @@ on:
   push:
   pull_request:
 jobs:
+  secrets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install pinned secret scanner and verify release checksum
+        shell: bash
+        run: |
+          scan_dir=$(mktemp -d)
+          cd "$scan_dir"
+          release=https://github.com/gitleaks/gitleaks/releases/download/v8.30.1
+          curl --fail --location --retry 3 "$release/gitleaks_8.30.1_linux_x64.tar.gz" -o gitleaks_8.30.1_linux_x64.tar.gz
+          curl --fail --location --retry 3 "$release/gitleaks_8.30.1_checksums.txt" -o checksums.txt
+          awk '$2 == "gitleaks_8.30.1_linux_x64.tar.gz"' checksums.txt > selected-checksum.txt
+          test -s selected-checksum.txt
+          sha256sum -c selected-checksum.txt
+          tar -xzf gitleaks_8.30.1_linux_x64.tar.gz gitleaks
+          install -m 755 gitleaks "$RUNNER_TEMP/gitleaks"
+          rm -rf "$scan_dir"
+      - name: Scan all Git history without exposing findings
+        run: '"$RUNNER_TEMP/gitleaks" git --log-opts="--all" --redact --no-banner'
   linux-publisher:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

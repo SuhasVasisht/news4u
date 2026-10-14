@@ -449,7 +449,10 @@ coverage-only check must approve the retained selection. Facts are not reviewed
 again merely to obtain another verdict. Unchanged same-edition findings retain
 their holds across fresh cutoffs and unrelated selection changes; validated audit
 pairs preserve them even when a shared latest file is corrupt. Changed prose,
-evidence, policy, history or edition date requires review again. Unusable shared
+evidence, policy, history or edition date requires review again. Completed factual
+batches are archived before the next external call, so a later batch or coverage
+outage cannot erase a hold. Approvals expire after six hours; unchanged blocked
+findings persist for the same edition date, including long outages. Unusable shared
 audit JSON is discarded as an optimization, without discarding valid archived
 findings. Mandatory corroboration requires two fresh independent publishers or
 fresh authoritative evidence; algorithm changes invalidate old source proof.

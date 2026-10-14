@@ -1,0 +1,3 @@
+# Historical README sample: environment-variable username and placeholder password.
+# Exact finding only; new occurrences and every other credential rule still scan.
+b77dae133b5a0d74bb26e68862868ff77daf5341:README.md:curl-auth-user:408

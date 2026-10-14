@@ -91,7 +91,7 @@ def reusable_story_checks(previous_request, request, report, zone="America/Los_A
         after_cutoff = datetime.fromisoformat(request["cutoff"])
         if (before_cutoff.tzinfo is None or after_cutoff.tzinfo is None
                 or before_cutoff.astimezone(ZoneInfo(zone)).date() != after_cutoff.astimezone(ZoneInfo(zone)).date()
-                or not timedelta(0) <= after_cutoff - before_cutoff <= timedelta(hours=6)):
+                or after_cutoff < before_cutoff):
             return []
     except (KeyError, TypeError, ValueError):
         return []
@@ -102,6 +102,13 @@ def reusable_story_checks(previous_request, request, report, zone="America/Los_A
     after_packets = {p["id"]: p for p in request["packets"]}
     before = {decision["id"]: decision for decision in previous_request["decisions"]}
     after = {decision["id"]: decision for decision in request["decisions"]}
+    def reusable_finding(story):
+        blocked = (story.verdict != "pass"
+                   or any(blocker.startswith(f"{story.id}:") for blocker in report.blockers))
+        # Time alone cannot resolve a factual hold. Approvals still expire after
+        # six hours; unchanged blocked findings survive this edition's full day.
+        return blocked or after_cutoff - before_cutoff <= timedelta(hours=6)
     return [deepcopy(story) for story in report.review.stories
-            if story.id in after_ids and before.get(story.id) == after.get(story.id)
+            if reusable_finding(story)
+            and story.id in after_ids and before.get(story.id) == after.get(story.id)
             and before_packets.get(story.id) == after_packets.get(story.id)]
