@@ -435,6 +435,17 @@ def validate_selection(selection, shortlist):
                          f"unknown IDs: {sorted(set(accounted) - known)}")
 
 
+def source_admission_blocker(packet):
+    """Deterministic source gates apply before and after editorial judgment."""
+    if packet["wordCount"] < 80:
+        return "Publisher evidence is shorter than the 80-word admission minimum"
+    if packet["truncated"]:
+        return "Publisher evidence is truncated"
+    if not packet["chunks"]:
+        return "Publisher evidence has no citeable chunks"
+    return None
+
+
 def validate_decisions(reviewed, packets):
     known = {p["id"]: p for p in packets}
     if len(reviewed.decisions) != len(known) or {d.id for d in reviewed.decisions} != set(known):
@@ -453,8 +464,8 @@ def validate_decisions(reviewed, packets):
             raise ValueError(f"Invalid evidence reference for {decision.id}; use only individual chunk IDs: {sorted(refs)}")
         if decision.decision == "admit":
             if not decision.evidence or not decision.summary or not decision.headline or packet["wordCount"] < 80:
-                raise ValueError("Admitted story lacks evidence")
-            if decision.quality < 65 or packet["truncated"]:
+                raise ValueError(f"Admitted story lacks evidence: {decision.id}; {source_admission_blocker(packet) or 'missing citation or published prose'}")
+            if decision.quality < 65 or source_admission_blocker(packet):
                 raise ValueError(f"Admitted story fails quality/completeness gate: {decision.id} (quality={decision.quality}, truncated={packet['truncated']})")
             if packet["kind"] == "podcast" and (len(decision.sections) < 6 or packet["wordCount"] < 2500):
                 raise ValueError("Podcast requires substantive transcript-based notes")

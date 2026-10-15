@@ -1,5 +1,17 @@
 # Daily publisher on a remote VM
 
+The installed Ubuntu publisher currently uses `news-publisher-user.timer` and
+`news-publisher-user.service`, not the legacy scheduler container. The container
+image remains a tested portable deployment option. A stopped legacy scheduler
+container is expected when the native service owns scheduling. Verify actual
+daily starts with `journalctl --user -u news-publisher-user.service --since yesterday`
+and inspect the publisher health file as well as timer state: an active timer
+proves scheduling, not a successful edition. Sports source admission now holds
+packets below 80 words, truncated packets and packets without evidence chunks
+before model review, using the same source gates as final validation. These holds
+are logged as `sports_candidate_held` and cannot block otherwise eligible stories
+by repeatedly requesting an impossible admission.
+
 ## Native Ubuntu alternative with an existing Codex login
 
 For a server already running Node 22, Python 3.12 and an authenticated Codex CLI,

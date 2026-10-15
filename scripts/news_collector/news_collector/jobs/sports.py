@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 from datetime import datetime, timezone
 
 from news_collector.runtime import build_runtime
-from news_collector.pipeline.editorial import codex_review, ReviewBatch, Decision, validate_decisions, reader_profile, EditionSelection, validate_selection
+from news_collector.pipeline.editorial import codex_review, ReviewBatch, Decision, validate_decisions, reader_profile, EditionSelection, validate_selection, source_admission_blocker
 from news_collector.pipeline.sports import LIMITS, prepare_sports, publish_sports, write_json, config_for, fingerprint, validate_sports_request, overlapping_sports_prose
 from news_collector.pipeline.sports_facts import PROMPT as FACTUAL_PROMPT, factual_request, validate_factual_checks, factual_proof, verify_factual_proof
 from news_collector.pipeline.edition_audit import StoryAuditReview
@@ -26,8 +26,19 @@ def overlapping_story(left, right):
 
 def review_candidates(request, prompt, output):
     decisions = []
+    eligible = []
+    for packet in request["packets"]:
+        blocker = source_admission_blocker(packet)
+        if blocker:
+            print(json.dumps({"event": "sports_candidate_held", "id": packet["id"],
+                              "wordCount": packet["wordCount"], "reason": blocker}), flush=True)
+            decisions.append(Decision(id=packet["id"], decision="hold", quality=0, importance=0,
+                kind=packet["kind"], reason=blocker, headline="", summary="", points=[],
+                sections=[], caveats=[], evidence=[], duplicate_of=None))
+        else:
+            eligible.append(packet)
     for group in dict.fromkeys(p["sportsGroup"] for p in request["packets"]):
-        group_packets = [p for p in request["packets"] if p["sportsGroup"] == group]
+        group_packets = [p for p in eligible if p["sportsGroup"] == group]
         for offset in range(0, len(group_packets), REVIEW_BATCH_SIZE):
             packets = group_packets[offset:offset + REVIEW_BATCH_SIZE]
             payload = {"packets": packets, "previouslyPublished": request["previouslyPublished"]}
@@ -54,7 +65,9 @@ def review_candidates(request, prompt, output):
                 validate_decisions(result, packets)
             write_json(cache, result.model_dump(mode="json"))
             decisions.extend(result.decisions)
-    return SportsReview(decisions=decisions)
+    result = SportsReview(decisions=decisions)
+    validate_decisions(result, request["packets"])
+    return result
 
 
 def select_sports(decisions, packets, *, deduplicate=True):

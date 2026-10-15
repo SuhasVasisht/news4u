@@ -40,6 +40,9 @@ Same-day edition revisions can retain that day's important stories.
 Quality must be >=65 and every admission must cite packet evidence. Keep importance
 on the overall newspaper scale, usually 40-70, reserving >80 for exceptional events.
 With no substantive current news, hold everything; the scoreboard still runs.
+Packets below 80 words, truncated packets, and packets without citeable chunks
+cannot be admitted. These deterministic source gates also apply to championship
+results: importance cannot substitute for complete evidence.
 
 Packets carrying carryoverFrom are a date-limited reader-authorized exception for
 last night's late edition. Reassess their importance against today's news. If kept,

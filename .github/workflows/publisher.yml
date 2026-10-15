@@ -35,7 +35,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - name: Build the same image used on the VM
+      - name: Build portable publisher image
         run: docker build -f Dockerfile.publisher -t news-app-publisher:ci .
       - name: Test quality gates and runtime without production secrets
         run: >-
