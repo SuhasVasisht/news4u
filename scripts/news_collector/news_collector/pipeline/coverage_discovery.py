@@ -115,7 +115,7 @@ def discover_coverage(output, cutoff, profile, checklist_file=None):
     output = Path(output)
     prompt_path = Path(__file__).resolve().parents[2] / "config" / "coverage-discovery-prompt.md"
     from .publishers import authority_policy_fingerprint
-    context = {"sourceVerificationVersion": 4, "authorityPolicy": authority_policy_fingerprint(),
+    context = {"sourceVerificationVersion": 5, "authorityPolicy": authority_policy_fingerprint(),
                "profile": profile, "prompt": prompt_path.read_text(),
                "model": os.environ.get("NEWS_EDITOR_MODEL", "default"),
                "effort": os.environ.get("NEWS_EDITOR_REASONING_EFFORT", "default")}

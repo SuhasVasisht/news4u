@@ -7,6 +7,27 @@ from news_collector.pipeline import images, extract
 NOW = datetime(2026, 10, 7, 14, tzinfo=timezone.utc)
 
 
+@pytest.mark.parametrize('publisher_date,claimed_date,passes', [
+    ('2026-10-22T21:00:00Z', '2026-10-22T00:00:00Z', True),
+    ('2026-10-22T21:00:00Z', '2026-10-21T00:00:00Z', False),
+    ('2026-10-24T21:00:00Z', '2026-10-24T00:00:00Z', False),
+    ('2026-10-01T21:00:00Z', '2026-10-01T00:00:00Z', False),
+])
+def test_treasury_publisher_field_resolves_real_date_contract_without_waiving_freshness(monkeypatch, publisher_date, claimed_date, passes):
+    html = f'<article><div class="field--name-field-news-publication-date"><time datetime="{publisher_date}" class="datetime">Publisher date</time></div></article>'
+    monkeypatch.setattr(images, 'download', lambda _, url, __: (html.encode(), url))
+    monkeypatch.setattr(extract, 'extract_text_from_html', lambda *_: 'verified publisher evidence ' * 100)
+    payload = event('https://home.treasury.gov/news/press-releases/source', claimed_date)
+    cutoff = datetime(2026, 10, 23, 14, tzinfo=timezone.utc)
+    if passes:
+        discovery.verify_must_cover_sources(payload, cutoff)
+        assert payload['events'][0]['sources'][0]['publishedAt'] == '2026-10-22T21:00:00+00:00'
+    else:
+        with pytest.raises(discovery.CoverageVerificationError):
+            discovery.verify_must_cover_sources(payload, cutoff)
+    assert payload['events'][0]['mustCover'] is True
+
+
 def event(url='https://www.who.int/news/direct-article', date='2026-10-07T12:00:00Z'):
     return {'events': [{'id': 'outbreak-update', 'mustCover': True, 'sources': [{'url': url, 'publishedAt': date}]}]}
 
@@ -278,7 +299,8 @@ def test_old_independent_background_cannot_corroborate_a_new_mandatory_developme
         assert discovery.verify_must_cover_sources(payload, NOW) == {'outbreak-update'}
 
 
-def test_older_verification_algorithm_proof_requires_fresh_source_verification(tmp_path, monkeypatch):
+@pytest.mark.parametrize('old_version', [3, 4])
+def test_older_verification_algorithm_proof_requires_fresh_source_verification(tmp_path, monkeypatch, old_version):
     import hashlib
     import json
     from news_collector.pipeline import editorial
@@ -296,7 +318,7 @@ def test_older_verification_algorithm_proof_requires_fresh_source_verification(t
     discovery.discover_coverage(target, NOW, {})
     context_path = target.with_suffix('.context.json')
     context = json.loads(context_path.read_text())
-    context['sourceVerificationVersion'] = 3
+    context['sourceVerificationVersion'] = old_version
     context_path.write_text(json.dumps(context))
     proof_path = target.with_suffix('.verified.json')
     proof = json.loads(proof_path.read_text())

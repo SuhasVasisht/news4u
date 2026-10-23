@@ -33,6 +33,26 @@ def test_does_not_substitute_modified_or_discovery_dates(html):
     assert article_publication_date(html) is None
 
 
+def test_drupal_news_publication_field_uses_publisher_datetime_not_other_page_times():
+    html = '''<header><time datetime="2026-10-23T12:00:00Z">Today</time></header>
+    <article><div class="field--name-field-news-publication-date">
+    <time datetime="2026-10-22T21:00:00Z" class="datetime">October 22, 2026</time>
+    </div><div class="field--name-field-news-modified-date">
+    <time datetime="2026-10-23T11:00:00Z">Updated</time></div></article>'''
+    assert article_publication_date(html).isoformat() == '2026-10-22T21:00:00+00:00'
+
+
+@pytest.mark.parametrize('html', [
+    '<article><time datetime="2026-10-22T21:00:00Z">Event</time></article>',
+    '<article><div class="field--name-field-news-modified-date"><time datetime="2026-10-22T21:00:00Z">Updated</time></div></article>',
+    '<footer><div class="field--name-field-news-publication-date"><time datetime="2026-10-22T21:00:00Z">Related</time></div></footer>',
+    '<article><div class="field--name-field-news-publication-date"><time datetime="bad-date">October 22</time></div></article>',
+    '<article><div class="field--name-field-news-publication-date"><time datetime="2026-10-22T21:00:00Z"></time><time datetime="2026-10-21T21:00:00Z"></time></div></article>',
+])
+def test_drupal_fallback_does_not_guess_from_unrelated_or_ambiguous_dates(html):
+    assert article_publication_date(html) is None
+
+
 def test_newsletter_packet_uses_publisher_date_and_preserves_source_hash(monkeypatch):
     now = datetime.now(timezone.utc)
     original = (now - timedelta(hours=24)).isoformat()

@@ -41,4 +41,11 @@ def article_publication_date(html):
             date = parse_datetime(article.get("datePublished"))
             if date:
                 return date
+    # Drupal press releases (including Treasury) expose an explicit publication
+    # field rather than schema.org metadata. Do not use arbitrary <time> nodes:
+    # navigation clocks, updated dates and event schedules are not publication.
+    dates = {date for node in page.css('article .field--name-field-news-publication-date time[datetime]')
+             if (date := parse_datetime(node.attributes.get("datetime"))) is not None}
+    if len(dates) == 1:
+        return dates.pop()
     return None
